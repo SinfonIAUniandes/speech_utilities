@@ -158,6 +158,12 @@ class SpeechUtilities:
         # ================================== PUBLISHER TO SPEECH DECALRATION ==================================
 
         self.speech_pub=rospy.Publisher('/speech', speech_msg, queue_size=10)
+        
+        # ================================== SERVICE PROXY ==================================
+
+        self.talk_proxy = rospy.ServiceProxy('/speech_utilities/talk_srv', talk_srv)
+
+        self.speech2text_srv_proxy = rospy.ServiceProxy('speech_utilities/speech2text_srv', speech2text_srv)
 
 ########################################  SPEECH SERVICES  ############################################
         
@@ -223,65 +229,16 @@ class SpeechUtilities:
             t1 = time.time()
             self.auto_cut = True
             while not self.auto_finished and time.time()-t1<max_timeout:
-                rospy.sleep(0.1)
+                time.sleep(0.1)
             if time.time()-t1>=max_timeout:
                 print(consoleFormatter.format("Timeout reached", "FAIL"))
                 self.set_volume(70)
-                #Set led color to white
-                sl.setLedsColor(255,255,255)
                 return "Timeout reached"
             else:
                 print(consoleFormatter.format("Person finished talking", "OKGREEN"))
         # If the duration is not 0, the recording will be stopped after the duration
         else:
-            rospy.sleep(req.duration)
-        #Set led color to white
-        sl.setLedsColor(255,255,255)
-        self.s2t = False
-        self.auto_cut = False
-        self.auto_finished = False
-        self.started_talking = False
-        #Set led color to white
-        self.set_volume(70)
-        # Save the audio from the speech2text buffer
-        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
-        self.speech_2_text_buffer = []
-        # Transcribe the audio
-        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
-        print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
-        return transcription
-
-    def speech2Text(self):
-        """
-        Input: None, autocut is on by default
-        ---
-        Internal function for speech services:
-        Returns the transcription of the audio from the microphone
-        """
-        print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
-        # Initialize a special buffer for the speech2text
-        self.set_volume(0)
-        self.speech_2_text_buffer = []
-        #Set eyes to blue
-        self.listening = True
-        self.s2t = True
-        #Set led color to blue
-        sl.setLedsColor(0,255,255)
-        # Timeout if the person talking is not recognized or it takes too long
-        max_timeout = 20
-        t1 = time.time()
-        self.auto_cut = True
-        print(self.auto_finished)
-        while not self.auto_finished and time.time()-t1<max_timeout:
-            rospy.sleep(0.1)
-        if time.time()-t1>=max_timeout:
-            print(consoleFormatter.format("Timeout reached", "FAIL"))
-            self.set_volume(70)
-            #Set led color to white
-            sl.setLedsColor(255,255,255)
-            return "Timeout reached"
-        else:
-            print(consoleFormatter.format("Person finished talking", "OKGREEN"))
+            time.sleep(req.duration)
         #Set led color to white
         sl.setLedsColor(255,255,255)
         self.s2t = False
@@ -437,7 +394,7 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
-            text = self.speech2Text()
+            text = self.speech2text_srv_proxy(0).transcription
             print(f"Transcription: {text}")
             counter, answer = sl.q_a_processing(text, df, req.tag, counter)
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
