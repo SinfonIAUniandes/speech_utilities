@@ -414,10 +414,10 @@ class SpeechUtilities:
         """
         print(consoleFormatter.format("Requested answer service!", "OKGREEN"))
         print(consoleFormatter.format(f"Question: {req.question}", "WARNING"))
-        self.turn_mic_pepper(True)
-        system_msg = f"""You are a Pepper robot named Nova from the University of the Andes, 
+        system_msg = f"""You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, 
         specially from the research group SinfonIA, you serve as a Social Robot and you are able 
         to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.
+        You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020.
         Answer all questions in the most accurate but nice way possible. {req.system_msg}""" 
         if not req.save_conversation:
             self.conversation_gpt = [{"role":"system","content":system_msg}]
