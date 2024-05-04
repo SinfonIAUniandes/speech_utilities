@@ -34,7 +34,7 @@ def setLedsColor(r,g,b):
     ledsMessage.blue = b
     ledsMessage.time = 0
     ledsPublisher.publish(ledsMessage)  #Inicio(aguamarina), Pepper esta ALSpeechRecognitionStatusPublisherlista para escuchar
-rospy.sleep(0.2)
+    rospy.sleep(0.2)
 
 def transcribe(file_path, model):
     """
@@ -106,6 +106,7 @@ def auto_cut_function(speech_utilities):
             speech_utilities.times_above_threshold -= 1
     if speech_utilities.times_above_threshold > 8 and not speech_utilities.started_talking:
         speech_utilities.started_talking = True
+        setLedsColor(0,255,255)
         print(speech_utilities.started_talking)
         print("times above threshold",speech_utilities.times_above_threshold)
         print(consoleFormatter.format("Person started talking", "OKGREEN"))
@@ -115,6 +116,7 @@ def auto_cut_function(speech_utilities):
         if speech_utilities.times_below_threshold > 0:
             speech_utilities.times_below_threshold -= 2
     if speech_utilities.times_below_threshold > 15 and not speech_utilities.auto_finished:
+        setLedsColor(255,255,255)
         speech_utilities.auto_finished = True
         
 def gpt(messages,temperature):
@@ -195,7 +197,7 @@ def q_a_processing(text, df, tag, counter):
         answer = ""
         counter += 1
     else:
-        answer = response[0]
+        answer = "".join(response)
         counter = 4
     return counter, answer
     
@@ -217,6 +219,3 @@ def word_to_sec(text, wpm):
     time = ((n_tokens/wpm)*c_1) + c_3
     c_2 = (time/65)
     return time + c_2
-
-
-        
