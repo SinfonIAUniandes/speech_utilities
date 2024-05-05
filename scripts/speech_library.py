@@ -3,7 +3,6 @@ import os
 import re
 import soundfile as sf
 import numpy as np
-import nltk
 import ConsoleFormatter
 import rospkg
 import openai
@@ -11,12 +10,8 @@ import rospy
 # === Import messages ===
 from robot_toolkit_msgs.msg import leds_parameters_msg
 
-# === Imports whisper ===
 import time
-import torch
-import whisper
 
-# === Parameters whisper ===
 def setLedsColor(r,g,b):
     """
     Function for setting the colors of the eyes of the robot.
@@ -36,36 +31,6 @@ def setLedsColor(r,g,b):
     ledsPublisher.publish(ledsMessage)  #Inicio(aguamarina), Pepper esta ALSpeechRecognitionStatusPublisherlista para escuchar
 rospy.sleep(0.2)
 
-def transcribe(file_path, model):
-    """
-    Input:
-    file_path: path of the .wav file to transcribe
-    model_size: size of the model to use ['tiny', 'base', 'small', 'medium', 'large-v1', 'large-v2', 'large']
-    ---
-    Output:
-    response of the local model with the transcription of the audio
-    ---
-    Use the local version of whisper for transcribing short audios
-    """
-    t1 = float(time.perf_counter() * 1000)
-    result = model.transcribe(file_path)
-    torch.cuda.empty_cache()
-    t2 = float(time.perf_counter() * 1000)
-    print("Local [ms]: ", float(t2-t1))
-    return result["text"]
-
-def load_model(model_size = "small"):
-    PATH_SPEECH_UTILITIES = rospkg.RosPack().get_path('speech_utilities')
-    PATH_DATA = PATH_SPEECH_UTILITIES+'/data'
-    in_memory = True
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    consoleFormatter=ConsoleFormatter.ConsoleFormatter()
-    print(consoleFormatter.format(f"Transcribing audio in {device.upper()}", "OKBLUE"))
-    if not os.path.exists(PATH_DATA+f"/{model_size}.pt"): 
-        print("Model not found, downloading it")
-        in_memory = False
-    model_whisp = whisper.load_model(model_size, in_memory= in_memory, download_root = PATH_DATA)
-    return model_whisp
 
 def save_recording(buffer,file_name,sample_rate):
     """
@@ -139,68 +104,9 @@ def gpt(messages,temperature):
                 messages = messages
             )
     return prediction['choices'][0]['message']
-
-def nltk_processing(text):
-    """
-    Input:
-    text: the text to process
-    ---
-    Output:
-    tuple containing two elements:
-        - A list of tokens.
-        - A list of tuples, where each tuple contains a token and its part-of-speech (POS) tag.
-            For example, [('The', 'DT'), ('quick', 'JJ'), ('brown', 'JJ'), ('fox', 'NN'), ('jumps', 'VBZ'),
-            ('over', 'IN'), ('the', 'DT'), ('lazy', 'JJ'), ('dog', 'NN'), ('.', '.')]
-            In this example, 'DT' represents a determiner, 'JJ' an adjective, 'NN' a noun, and 'VBZ' a verb in third person singular present.
-    ---
-    Perform text processing using NLTK
-    """
-    if text == "":
-        return [], []
-    if not os.path.exists(nltk.data.find("tokenizers/punkt")):
-        nltk.download('punkt')
-    if not os.path.exists(nltk.data.find("taggers/averaged_perceptron_tagger")):
-        nltk.download('averaged_perceptron_tagger')
-    try:
-        tokens = nltk.tokenize.word_tokenize(text)
-        etiquetas = nltk.pos_tag(tokens)
-        return tokens, etiquetas
-    except Exception as e:
-        print("Error:", e)
-        return [], []
-    
-def q_a_processing(text, df, tag, counter):
-    """
-    Input:
-    text: the text to process using nltk
-    df: the dataframe with all the information in it
-    tag: the column name that will be used for filtering the dataframe
-    counter: the int that keeps track of how many times we have processed a question
-    ---
-    Output:
-    Tuple with the counter updated and the answer filtered
-    ---
-    Using the dataframe given by parameter look for the answer of the question given by tag
-    """
-    category = df.at[tag, 'category'].split(',')
-    posible = df.at[tag, 'posible'].split(',')
-    no_wanted = df.at[tag, 'no_wanted'].split(',')
-    etiquetas = nltk_processing(text)[1]
-    possible_responses = []
-    for tuple in etiquetas:
-        if tuple[1] in category or tuple[0] in posible:
-            possible_responses.append(tuple[0])
-    response = [palabra for palabra in possible_responses if palabra.lower() not in no_wanted]
-    if response == []: 
-        answer = ""
-        counter += 1
-    else:
-        answer = response[0]
-        counter = 4
-    return counter, answer
     
 def word_to_sec(text, wpm):
-    """
+    """API
     Input:
     text: the sentence for which you want to estimate the speaking time
     wpm: the words per minute speed to use for the estimate

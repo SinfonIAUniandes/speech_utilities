@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.8
 import time
 import rospkg
 import rospy
@@ -10,6 +10,7 @@ import subprocess
 import ConsoleFormatter
 import sounddevice
 import speech_library as sl
+import speech_recognition as sr
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
@@ -29,7 +30,7 @@ class SpeechUtilities:
         
         try:
             available_services = rosservice.get_service_list()
-            self.ROS=True
+            self.ROS='/robot_toolkit/audio_tools_srv' in available_services
         except:
             self.ROS=False
 
@@ -59,17 +60,13 @@ class SpeechUtilities:
 
         # isTalking variable
         self.isTalking = False
-
-        # Whisper Model
-        self.whisper_model = sl.load_model("small.en")
+        
+        # Initialice speech node
+        rospy.init_node('SpeechUtilities', anonymous=True)
 
         # ================================== IF LOCAL ==================================
             
-        if not self.ROS or '/robot_toolkit/audio_tools_srv' not in available_services:
-            # Initialice roscore
-            subprocess.Popen('roscore')
-            rospy.sleep(2)
-            rospy.init_node('SpeechUtilities', anonymous=True)
+        if not self.ROS:
             # Initialice local audio publisher from PC mic
             self.audio_pub=rospy.Publisher('/mic', AudioBuffer, queue_size=10)
             local_audio = threading.Thread(target=self.publish_local_audio)
@@ -79,8 +76,6 @@ class SpeechUtilities:
         # ================================== IF PEPPER AVAILABLE ==================================
 
         if self.ROS:
-            # Initialice speech node
-            rospy.init_node('SpeechUtilities', anonymous=True)
             # Enable speech from toolkit
             rospy.wait_for_service('/robot_toolkit/audio_tools_srv')
             self.audioToolsService = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
@@ -124,6 +119,8 @@ class SpeechUtilities:
             #Set led color to white
             sl.setLedsColor(255,255,255)
             
+            #Google
+            self.r = sr.Recognizer()
             
         # ================================== SERVICES DECLARATION ==================================
             
@@ -131,6 +128,10 @@ class SpeechUtilities:
         self.speech2text= rospy.Service("speech_utilities/speech2text_srv", speech2text_srv, self.callback_speech2text)
         print(consoleFormatter.format('speech2text on!', 'OKGREEN'))
         
+        print(consoleFormatter.format('waiting for SPANISHspeech2text service!', 'WARNING'))  
+        self.speech2text= rospy.Service("speech_utilities/speech2text_spanish", speech2text_srv, self.callback_spanish_speech2text)
+        print(consoleFormatter.format('SPANISHspeech2text on!', 'OKGREEN'))
+
         print(consoleFormatter.format('waiting for answers_srv service!', 'WARNING'))  
         self.chatGPT_question_answer= rospy.Service("speech_utilities/answers_srv", answer_srv , self.callback_gpt_question_answer)
         print(consoleFormatter.format('answers_srv on!', 'OKGREEN'))
@@ -203,6 +204,82 @@ class SpeechUtilities:
 
   
     # ================================== SPEECH2TEXT ==================================
+    def callback_spanish_speech2text(self, req):
+        """
+        Input:
+        int32 duration: duration of the recording in seconds. If 0, the recording will be stopped when the person stops talking
+        ---
+        Output: 
+        string transcription: transcription of the audio
+        ---
+        Returns the transcription of the audio from the microphone in spanish
+        """
+        print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
+        # Initialize a special buffer for the speech2text
+        self.set_volume(0)
+        self.speech_2_text_buffer = []
+        #Set eyes to blue
+        self.listening = True
+        self.s2t = True
+        audio_tools_proxy = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
+        audioMessage = audio_tools_msg()
+        audioMessage.command = "custom"
+        audioMessage.frequency = 16000
+        audioMessage.channels = 3
+        audio_tools_proxy(audioMessage)
+        rospy.sleep(1)
+        #Set led color to blue
+        sl.setLedsColor(0,255,255)
+        # If the duration is 0, the recording will be stopped when the person stops talking
+        if req.duration == 0:
+            # Timeout if the person talking is not recognized or it takes too long
+            max_timeout = 20
+            t1 = time.time()
+            self.auto_cut = True
+            while not self.auto_finished and time.time()-t1<max_timeout:
+                time.sleep(0.1)
+            if time.time()-t1>=max_timeout:
+                print(consoleFormatter.format("Timeout reached", "FAIL"))
+                self.set_volume(70)
+                return "Timeout reached"
+            else:
+                print(consoleFormatter.format("Person finished talking", "OKGREEN"))
+        # If the duration is not 0, the recording will be stopped after the duration
+        else:
+            time.sleep(req.duration)
+        #Set led color to white
+        sl.setLedsColor(255,255,255)
+        self.s2t = False
+        self.auto_cut = False
+        self.auto_finished = False
+        self.started_talking = False
+        #Set led color to white
+        self.set_volume(70)
+        # Save the audio from the speech2text buffer
+        sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
+        audioMessage = audio_tools_msg()
+        audioMessage.command = "disable"
+        audio_tools_proxy(audioMessage)
+        audioMessage = audio_tools_msg()
+        audioMessage.command = "enable"
+        rospy.sleep(1)
+        audio_tools_proxy(audioMessage)
+        self.speech_2_text_buffer = []
+        # Transcribe the audio
+        with sr.AudioFile(self.PATH_DATA+"/speech2text.wav") as source:
+            audio = self.r.record(source)
+        transcription = "None"
+        try:
+            transcription = self.r.recognize_google(audio,language="es")
+        except sr.UnknownValueError:
+            print("Google no entendio")
+        except sr.RequestError:
+            print("Error en la peticion")
+        print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
+        return transcription
+
+
+
     def callback_speech2text(self, req):
         """
         Input:
@@ -251,7 +328,6 @@ class SpeechUtilities:
         sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
         self.speech_2_text_buffer = []
         # Transcribe the audio
-        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
         return transcription
     
@@ -381,23 +457,7 @@ class SpeechUtilities:
         ---
         Callback for q_a_speech_srv, this service return a specific answer for predefined questions
         """
-        print(consoleFormatter.format("Requested Q&A service!", "OKGREEN"))
-        df = pd.read_csv(self.PATH_DATA+'/data.csv')
-        tags = df['tag'].tolist()
-        df.set_index('tag', inplace=True)
-        if req.tag in tags:
-            question_value = df.at[req.tag, 'question']
-        else:
-            print(consoleFormatter.format(f"Invalid Tag", "FAIL"))
-            return "Invalid Tag"
-        counter = 0
-        while counter < 3:
-            self.talk(question_value, "English", False)
-            rospy.sleep(1)
-            text = self.speech2text_srv_proxy(0).transcription
-            print(f"Transcription: {text}")
-            counter, answer = sl.q_a_processing(text, df, req.tag, counter)
-        print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
+        answer = "Sapo, no hay recursos para eso"
         return answer
 
     # ================================== GPT Q&A ==================================
@@ -438,7 +498,7 @@ class SpeechUtilities:
         """
         Extracts the audio from the local microphone
         """
-        with sounddevice.InputStream(callback=self.audio_callback, channels=1, samplerate=self.sample_rate, blocksize= 16384):
+        with sounddevice.InputStream(callback=self.audio_callback, channels=1, samplerate=16000):
             while not rospy.is_shutdown():
                 rospy.sleep(0.01)
             sounddevice.stop()
