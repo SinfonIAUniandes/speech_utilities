@@ -6,7 +6,7 @@ import numpy as np
 import nltk
 import ConsoleFormatter
 import rospkg
-import openai
+from openai import AzureOpenAI
 import rospy    
 # === Import messages ===
 from robot_toolkit_msgs.msg import leds_parameters_msg
@@ -119,7 +119,7 @@ def auto_cut_function(speech_utilities):
         setLedsColor(255,255,255)
         speech_utilities.auto_finished = True
         
-def gpt(messages,temperature):
+def gpt(client,messages,temperature):
     """
     Input:
     messages: list of dictionaries
@@ -130,17 +130,17 @@ def gpt(messages,temperature):
     ---
     This function is used to make a request to the GPT model given a list of dictionaries
     """
-    openai.api_type="azure"
-    openai.api_version = "2023-05-15"
-    prediction = openai.ChatCompletion.create(
-                api_key= os.getenv("GPT_API"),
-                api_base="https://sinfonia.openai.azure.com/" ,
-                engine="sinfoniaOpenai",
-                temperature= temperature,
-                max_tokens=100,
-                messages = messages
-            )
-    return prediction['choices'][0]['message']
+    prediction = client.chat.completions.create(
+        model="sinfoniaOpenai", 
+        messages=messages, 
+        temperature=temperature, 
+        max_tokens=100
+    )
+    response = {
+        "content": prediction.choices[0].message.content,
+        "role": prediction.choices[0].message.role,
+    }
+    return response
 
 def nltk_processing(text):
     """

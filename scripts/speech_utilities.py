@@ -9,8 +9,10 @@ import rosservice
 import subprocess
 import ConsoleFormatter
 import sounddevice
+import os
 import speech_library as sl
 import speech_recognition as sr
+from openai import AzureOpenAI
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
@@ -63,6 +65,13 @@ class SpeechUtilities:
 
         # Whisper Model
         self.whisper_model = sl.load_model("small.en")
+
+        # OpenAI GPT Model
+        self.clientGPT = AzureOpenAI(
+            azure_endpoint= "https://sinfonia.openai.azure.com/",
+            api_key= os.getenv("GPT_API"),
+            api_version="2023-05-15",
+        )
 
         # ================================== IF LOCAL ==================================
             
@@ -547,7 +556,7 @@ class SpeechUtilities:
         if not req.save_conversation:
             self.conversation_gpt = [{"role":"system","content":system_msg}]
         self.conversation_gpt.append({"role":"user","content":req.question})
-        response = sl.gpt(self.conversation_gpt,req.temperature)
+        response = sl.gpt(self.clientGPT, self.conversation_gpt,req.temperature)
         if "content" in response:
             answer = response["content"]
             print(consoleFormatter.format(f"Response: {answer}", "OKBLUE"))
