@@ -9,8 +9,10 @@ import rosservice
 import subprocess
 import ConsoleFormatter
 import sounddevice
+import os
 import speech_library as sl
 import speech_recognition as sr
+from openai import AzureOpenAI
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
@@ -63,6 +65,13 @@ class SpeechUtilities:
 
         # Whisper Model
         self.whisper_model = sl.load_model("small.en")
+
+        # OpenAI GPT Model
+        self.clientGPT = AzureOpenAI(
+            azure_endpoint= "https://sinfonia.openai.azure.com/",
+            api_key= os.getenv("GPT_API"),
+            api_version="2023-05-15",
+        )
 
         # ================================== IF LOCAL ==================================
             
@@ -126,7 +135,7 @@ class SpeechUtilities:
             sl.setLedsColor(255,255,255)
             
             #Google
-            self.google_model = sr.Recognizer()
+            self.r = sr.Recognizer()
             
             
         # ================================== SERVICES DECLARATION ==================================
@@ -134,6 +143,10 @@ class SpeechUtilities:
         print(consoleFormatter.format('waiting for speech2text service!', 'WARNING'))  
         self.speech2text_declaration= rospy.Service("speech_utilities/speech2text_srv", speech2text_srv, self.callback_speech2text)
         print(consoleFormatter.format('speech2text on!', 'OKGREEN'))
+            
+        print(consoleFormatter.format('waiting for SPANISHspeech2text service!', 'WARNING'))  
+        self.speech2text= rospy.Service("speech_utilities/speech2text_spanish", speech2text_srv, self.callback_spanish_speech2text)
+        print(consoleFormatter.format('SPANISHspeech2text on!', 'OKGREEN'))
         
         print(consoleFormatter.format('waiting for answers_srv service!', 'WARNING'))  
         self.chatGPT_question_answer= rospy.Service("speech_utilities/answers_srv", answer_srv , self.callback_gpt_question_answer)
@@ -199,9 +212,85 @@ class SpeechUtilities:
         except rospy.ServiceException as e:
             print(f"Error al cambiar el estado del micrófono: {e}")
             return False
+        
 
   
-    # ================================== SPEECH2TEXT ==================================    
+    # ================================== SPEECH2TEXT ==================================
+    
+    def callback_spanish_speech2text(self, req):
+        """
+        Input:
+        int32 duration: duration of the recording in seconds. If 0, the recording will be stopped when the person stops talking
+        ---
+        Output: 
+        string transcription: transcription of the audio
+        ---
+        Returns the transcription of the audio from the microphone in spanish
+        """
+        print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
+        # Initialize a special buffer for the speech2text
+        self.set_volume(0)
+        self.speech_2_text_buffer = []
+        #Set eyes to blue
+        self.listening = True
+        self.s2t = True
+        audio_tools_proxy = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
+        audioMessage = audio_tools_msg()
+        audioMessage.command = "custom"
+        audioMessage.frequency = 16000
+        audioMessage.channels = 3
+        audio_tools_proxy(audioMessage)
+        rospy.sleep(1)
+        #Set led color to blue
+        sl.setLedsColor(0,255,255)
+        # If the duration is 0, the recording will be stopped when the person stops talking
+        if req.duration == 0:
+            # Timeout if the person talking is not recognized or it takes too long
+            max_timeout = 20
+            t1 = time.time()
+            self.auto_cut = True
+            while not self.auto_finished and time.time()-t1<max_timeout:
+                time.sleep(0.1)
+            if time.time()-t1>=max_timeout:
+                print(consoleFormatter.format("Timeout reached", "FAIL"))
+                self.set_volume(70)
+                return "Timeout reached"
+            else:
+                print(consoleFormatter.format("Person finished talking", "OKGREEN"))
+        # If the duration is not 0, the recording will be stopped after the duration
+        else:
+            time.sleep(req.duration)
+        #Set led color to white
+        sl.setLedsColor(255,255,255)
+        self.s2t = False
+        self.auto_cut = False
+        self.auto_finished = False
+        self.started_talking = False
+        #Set led color to white
+        self.set_volume(70)
+        # Save the audio from the speech2text buffer
+        sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
+        audioMessage = audio_tools_msg()
+        audioMessage.command = "disable"
+        audio_tools_proxy(audioMessage)
+        audioMessage = audio_tools_msg()
+        audioMessage.command = "enable"
+        rospy.sleep(1)
+        audio_tools_proxy(audioMessage)
+        self.speech_2_text_buffer = []
+        # Transcribe the audio
+        with sr.AudioFile(self.PATH_DATA+"/speech2text.wav") as source:
+            audio = self.r.record(source)
+        transcription = "None"
+        try:
+            transcription = self.r.recognize_google(audio,language="es")
+        except sr.UnknownValueError:
+            print("Google no entendio")
+        except sr.RequestError:
+            print("Error en la peticion")
+        print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
+        return transcription
+    
     
     def callback_speech2text(self, req):
         """
@@ -256,7 +345,7 @@ class SpeechUtilities:
                 print(consoleFormatter.format("Person finished talking", "OKGREEN"))
         # If the duration is not 0, the recording will be stopped after the duration
         else:
-            rospy.sleep(duration)
+            time.sleep(req.duration)
         #Set led color to white
         sl.setLedsColor(255,255,255)
         self.s2t = False
@@ -266,20 +355,55 @@ class SpeechUtilities:
         #Set led color to white
         self.set_volume(70)
         # Save the audio from the speech2text buffer
-        if lang=="esp":
-            sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
-            transcription = sl.transcribe_spanish(self.PATH_DATA+"/speech2text.wav", self.google_model)
-            audioMessage = audio_tools_msg()
-            audioMessage.command = "disable"
-            audio_tools_proxy(audioMessage)
-            audioMessage = audio_tools_msg()
-            audioMessage.command = "enable"
-            rospy.sleep(1)
-            audio_tools_proxy(audioMessage)
-        else:
-            sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
-            transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
+        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
         self.speech_2_text_buffer = []
+        # Transcribe the audio
+        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
+        print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
+        return transcription
+        
+    
+    def speech2text(self):
+        """
+        Output: 
+        string transcription: transcription of the audio
+        ---
+        Returns the transcription of the audio from the microphone
+        """
+        print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
+        # Initialize a special buffer for the speech2text
+        self.set_volume(0)
+        self.speech_2_text_buffer = []
+        #Set eyes to blue
+        self.listening = True
+        self.s2t = True
+        #Set led color to blue
+        sl.setLedsColor(0,255,255)
+        # Timeout if the person talking is not recognized or it takes too long
+        max_timeout = 20
+        t1 = time.time()
+        self.auto_cut = True
+        while not self.auto_finished and time.time()-t1<max_timeout:
+            time.sleep(0.1)
+        if time.time()-t1>=max_timeout:
+            print(consoleFormatter.format("Timeout reached", "FAIL"))
+            self.set_volume(70)
+            return "Timeout reached"
+        else:
+            print(consoleFormatter.format("Person finished talking", "OKGREEN"))
+        #Set led color to white
+        sl.setLedsColor(255,255,255)
+        self.s2t = False
+        self.auto_cut = False
+        self.auto_finished = False
+        self.started_talking = False
+        #Set led color to white
+        self.set_volume(70)
+        # Save the audio from the speech2text buffer
+        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
+        self.speech_2_text_buffer = []
+        # Transcribe the audio
+        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
         return transcription
         
@@ -423,7 +547,7 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
-            text = self.speech2text(7,"eng")
+            text = self.speech2text()
             print(f"Transcription: {text}")
             counter, answer = sl.q_a_processing(text, df, req.tag, counter)
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
@@ -451,7 +575,7 @@ class SpeechUtilities:
         if not req.save_conversation:
             self.conversation_gpt = [{"role":"system","content":system_msg}]
         self.conversation_gpt.append({"role":"user","content":req.question})
-        response = sl.gpt(self.conversation_gpt,req.temperature)
+        response = sl.gpt(self.clientGPT, self.conversation_gpt,req.temperature)
         if "content" in response:
             answer = response["content"]
             print(consoleFormatter.format(f"Response: {answer}", "OKBLUE"))
