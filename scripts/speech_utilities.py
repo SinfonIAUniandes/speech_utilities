@@ -10,6 +10,7 @@ import subprocess
 import ConsoleFormatter
 import sounddevice
 import speech_library as sl
+import speech_recognition as sr
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
@@ -55,7 +56,7 @@ class SpeechUtilities:
         self.started_talking = False
 
         # Answer variables
-        self.conversation_gpt = [{"role":"system","content":"You are a Pepper robot named Nova from the University of the Andes, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others. Asnwer all questions in the most accurate but nice way possible."}]
+        self.conversation_gpt = [{"role":"system","content":"You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory. Answer all questions in the most accurate but nice way possible. "}]
 
         # isTalking variable
         self.isTalking = False
@@ -124,11 +125,14 @@ class SpeechUtilities:
             #Set led color to white
             sl.setLedsColor(255,255,255)
             
+            #Google
+            self.google_model = sr.Recognizer()
+            
             
         # ================================== SERVICES DECLARATION ==================================
             
         print(consoleFormatter.format('waiting for speech2text service!', 'WARNING'))  
-        self.speech2text= rospy.Service("speech_utilities/speech2text_srv", speech2text_srv, self.callback_speech2text)
+        self.speech2text_declaration= rospy.Service("speech_utilities/speech2text_srv", speech2text_srv, self.callback_speech2text)
         print(consoleFormatter.format('speech2text on!', 'OKGREEN'))
         
         print(consoleFormatter.format('waiting for answers_srv service!', 'WARNING'))  
@@ -136,19 +140,19 @@ class SpeechUtilities:
         print(consoleFormatter.format('answers_srv on!', 'OKGREEN'))
 
         print(consoleFormatter.format('waiting for hot_word_srv service!', 'WARNING'))  
-        self.chatGPT_question_answer= rospy.Service("speech_utilities/hot_word_srv", hot_word_srv , self.callback_hot_word_srv)
+        self.hot_word_declaration= rospy.Service("speech_utilities/hot_word_srv", hot_word_srv , self.callback_hot_word_srv)
         print(consoleFormatter.format('hot_word_srv on!', 'OKGREEN'))
 
         print(consoleFormatter.format('waiting for calibrate_srv service!', 'WARNING'))  
-        self.chatGPT_question_answer= rospy.Service("speech_utilities/calibrate_srv", calibrate_srv , self.callback_calibrate)
+        self.calibrate_declaration= rospy.Service("speech_utilities/calibrate_srv", calibrate_srv , self.callback_calibrate)
         print(consoleFormatter.format('calibrate_srv on!', 'OKGREEN'))
 
         print(consoleFormatter.format('waiting for talk service!', 'WARNING'))  
-        self.speech2text= rospy.Service("speech_utilities/talk_srv", talk_srv, self.callback_talk)
+        self.talk_declaration= rospy.Service("speech_utilities/talk_srv", talk_srv, self.callback_talk)
         print(consoleFormatter.format('talk on!', 'OKGREEN'))
         
         print(consoleFormatter.format('waiting for q_a service!', 'WARNING'))  
-        self.speech2text= rospy.Service("speech_utilities/q_a_srv", q_a_srv, self.callback_q_a)
+        self.q_a_declaration= rospy.Service("speech_utilities/q_a_srv", q_a_srv, self.callback_q_a)
         print(consoleFormatter.format('q_a on!', 'OKGREEN'))
 
         # ================================== SUBSCRIBER TO MIC DECLARATION ==================================
@@ -160,10 +164,6 @@ class SpeechUtilities:
         self.speech_pub=rospy.Publisher('/speech', speech_msg, queue_size=10)
         
         # ================================== SERVICE PROXY ==================================
-
-        self.talk_proxy = rospy.ServiceProxy('/speech_utilities/talk_srv', talk_srv)
-
-        self.speech2text_srv_proxy = rospy.ServiceProxy('speech_utilities/speech2text_srv', speech2text_srv)
 
 ########################################  SPEECH SERVICES  ############################################
         
@@ -199,15 +199,25 @@ class SpeechUtilities:
         except rospy.ServiceException as e:
             print(f"Error al cambiar el estado del micrófono: {e}")
             return False
-        
 
   
-    # ================================== SPEECH2TEXT ==================================
+    # ================================== SPEECH2TEXT ==================================    
+    
     def callback_speech2text(self, req):
         """
         Input:
         int32 duration: duration of the recording in seconds. If 0, the recording will be stopped when the person stops talking
         ---
+        Output: 
+        string transcription: transcription of the audio
+        ---
+        Returns the transcription of the audio from the microphone
+        """
+        transcription = self.speech2text(req.duration, req.lang)
+        return transcription
+    
+    def speech2text(self, duration, lang):
+        """
         Output: 
         string transcription: transcription of the audio
         ---
@@ -220,10 +230,18 @@ class SpeechUtilities:
         #Set eyes to blue
         self.listening = True
         self.s2t = True
+        if lang=="esp":
+            audio_tools_proxy = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
+            audioMessage = audio_tools_msg()
+            audioMessage.command = "custom"
+            audioMessage.frequency = 16000
+            audioMessage.channels = 3
+            audio_tools_proxy(audioMessage)
+            rospy.sleep(1)
         #Set led color to blue
         sl.setLedsColor(0,255,255)
         # If the duration is 0, the recording will be stopped when the person stops talking
-        if req.duration == 0:
+        if duration == 0:
             # Timeout if the person talking is not recognized or it takes too long
             max_timeout = 20
             t1 = time.time()
@@ -238,7 +256,7 @@ class SpeechUtilities:
                 print(consoleFormatter.format("Person finished talking", "OKGREEN"))
         # If the duration is not 0, the recording will be stopped after the duration
         else:
-            time.sleep(req.duration)
+            rospy.sleep(duration)
         #Set led color to white
         sl.setLedsColor(255,255,255)
         self.s2t = False
@@ -248,12 +266,23 @@ class SpeechUtilities:
         #Set led color to white
         self.set_volume(70)
         # Save the audio from the speech2text buffer
-        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
+        if lang=="esp":
+            sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
+            transcription = sl.transcribe_spanish(self.PATH_DATA+"/speech2text.wav", self.google_model)
+            audioMessage = audio_tools_msg()
+            audioMessage.command = "disable"
+            audio_tools_proxy(audioMessage)
+            audioMessage = audio_tools_msg()
+            audioMessage.command = "enable"
+            rospy.sleep(1)
+            audio_tools_proxy(audioMessage)
+        else:
+            sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
+            transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         self.speech_2_text_buffer = []
-        # Transcribe the audio
-        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
         return transcription
+        
     
     # ================================== HOT WORD ==================================
     def callback_hot_word_srv(self, req):
@@ -394,7 +423,7 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
-            text = self.speech2text_srv_proxy(0).transcription
+            text = self.speech2text(7,"eng")
             print(f"Transcription: {text}")
             counter, answer = sl.q_a_processing(text, df, req.tag, counter)
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
@@ -417,7 +446,7 @@ class SpeechUtilities:
         system_msg = f"""You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, 
         specially from the research group SinfonIA, you serve as a Social Robot and you are able 
         to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.
-        You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020.
+        You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.
         Answer all questions in the most accurate but nice way possible. {req.system_msg}""" 
         if not req.save_conversation:
             self.conversation_gpt = [{"role":"system","content":system_msg}]

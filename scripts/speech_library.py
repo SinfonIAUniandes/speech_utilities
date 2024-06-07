@@ -2,6 +2,7 @@
 import os
 import re
 import soundfile as sf
+import speech_recognition as sr
 import numpy as np
 import nltk
 import ConsoleFormatter
@@ -40,7 +41,7 @@ def transcribe(file_path, model):
     """
     Input:
     file_path: path of the .wav file to transcribe
-    model_size: size of the model to use ['tiny', 'base', 'small', 'medium', 'large-v1', 'large-v2', 'large']
+    model: Whisper model instance to transcribe audio
     ---
     Output:
     response of the local model with the transcription of the audio
@@ -53,6 +54,28 @@ def transcribe(file_path, model):
     t2 = float(time.perf_counter() * 1000)
     print("Local [ms]: ", float(t2-t1))
     return result["text"]
+
+def transcribe_spanish(file_path, model):
+    """
+    Input:
+    file_path: path of the .wav file to transcribe
+    model: Google model instance to transcribe audio
+    ---
+    Output:
+    response of the cloud model with the transcription of the audio in spanish
+    ---
+    Use the cloud version of Google Recognizer for transcribing short audios
+    """
+    with sr.AudioFile(file_path) as source:
+            audio = model.record(source)
+    transcription = "None"
+    try:
+        transcription = model.recognize_google(audio,language="es")
+    except sr.UnknownValueError:
+        print("Google no entendio")
+    except sr.RequestError:
+        print("Error en la peticion")
+    return transcription
 
 def load_model(model_size = "small"):
     PATH_SPEECH_UTILITIES = rospkg.RosPack().get_path('speech_utilities')
