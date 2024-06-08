@@ -1,13 +1,11 @@
 # This file contains the speech library class which is used to have all the functions related to the speech library
 import os
-import re
 import soundfile as sf
 import speech_recognition as sr
 import numpy as np
 import nltk
 import ConsoleFormatter
 import rospkg
-from openai import AzureOpenAI
 import rospy    
 # === Import messages ===
 from robot_toolkit_msgs.msg import leds_parameters_msg

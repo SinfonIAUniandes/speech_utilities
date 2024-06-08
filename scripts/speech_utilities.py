@@ -12,6 +12,7 @@ import sounddevice
 import os
 import speech_library as sl
 import speech_recognition as sr
+import webrtcvad
 from openai import AzureOpenAI
 
 # Speech_msgs
@@ -65,6 +66,15 @@ class SpeechUtilities:
 
         # Whisper Model
         self.whisper_model = sl.load_model("small.en")
+        #Google
+        self.google_recognize = sr.Recognizer()
+
+        # Inicializa el detector de actividad de voz
+        self.vad = webrtcvad.Vad()
+        self.vad.set_mode(3)  # 0 es el menos agresivo, 3 es el más agresivo
+        self.person_speaking = False
+        # 0 Es que recien le acaban de hablar, el numero se refiere a hace cuantos buffers fue la ultima instancia de habla
+        self.last_speaking_instance = 0
 
         # OpenAI GPT Model
         self.clientGPT = AzureOpenAI(
@@ -134,19 +144,12 @@ class SpeechUtilities:
             #Set led color to white
             sl.setLedsColor(255,255,255)
             
-            #Google
-            self.r = sr.Recognizer()
-            
             
         # ================================== SERVICES DECLARATION ==================================
             
         print(consoleFormatter.format('waiting for speech2text service!', 'WARNING'))  
         self.speech2text_declaration= rospy.Service("speech_utilities/speech2text_srv", speech2text_srv, self.callback_speech2text)
         print(consoleFormatter.format('speech2text on!', 'OKGREEN'))
-            
-        print(consoleFormatter.format('waiting for SPANISHspeech2text service!', 'WARNING'))  
-        self.speech2text= rospy.Service("speech_utilities/speech2text_spanish", speech2text_srv, self.callback_spanish_speech2text)
-        print(consoleFormatter.format('SPANISHspeech2text on!', 'OKGREEN'))
         
         print(consoleFormatter.format('waiting for answers_srv service!', 'WARNING'))  
         self.chatGPT_question_answer= rospy.Service("speech_utilities/answers_srv", answer_srv , self.callback_gpt_question_answer)
@@ -217,81 +220,6 @@ class SpeechUtilities:
   
     # ================================== SPEECH2TEXT ==================================
     
-    def callback_spanish_speech2text(self, req):
-        """
-        Input:
-        int32 duration: duration of the recording in seconds. If 0, the recording will be stopped when the person stops talking
-        ---
-        Output: 
-        string transcription: transcription of the audio
-        ---
-        Returns the transcription of the audio from the microphone in spanish
-        """
-        print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
-        # Initialize a special buffer for the speech2text
-        self.set_volume(0)
-        self.speech_2_text_buffer = []
-        #Set eyes to blue
-        self.listening = True
-        self.s2t = True
-        audio_tools_proxy = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
-        audioMessage = audio_tools_msg()
-        audioMessage.command = "custom"
-        audioMessage.frequency = 16000
-        audioMessage.channels = 3
-        audio_tools_proxy(audioMessage)
-        rospy.sleep(1)
-        #Set led color to blue
-        sl.setLedsColor(0,255,255)
-        # If the duration is 0, the recording will be stopped when the person stops talking
-        if req.duration == 0:
-            # Timeout if the person talking is not recognized or it takes too long
-            max_timeout = 20
-            t1 = time.time()
-            self.auto_cut = True
-            while not self.auto_finished and time.time()-t1<max_timeout:
-                time.sleep(0.1)
-            if time.time()-t1>=max_timeout:
-                print(consoleFormatter.format("Timeout reached", "FAIL"))
-                self.set_volume(70)
-                return "Timeout reached"
-            else:
-                print(consoleFormatter.format("Person finished talking", "OKGREEN"))
-        # If the duration is not 0, the recording will be stopped after the duration
-        else:
-            time.sleep(req.duration)
-        #Set led color to white
-        sl.setLedsColor(255,255,255)
-        self.s2t = False
-        self.auto_cut = False
-        self.auto_finished = False
-        self.started_talking = False
-        #Set led color to white
-        self.set_volume(70)
-        # Save the audio from the speech2text buffer
-        sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
-        audioMessage = audio_tools_msg()
-        audioMessage.command = "disable"
-        audio_tools_proxy(audioMessage)
-        audioMessage = audio_tools_msg()
-        audioMessage.command = "enable"
-        rospy.sleep(1)
-        audio_tools_proxy(audioMessage)
-        self.speech_2_text_buffer = []
-        # Transcribe the audio
-        with sr.AudioFile(self.PATH_DATA+"/speech2text.wav") as source:
-            audio = self.r.record(source)
-        transcription = "None"
-        try:
-            transcription = self.r.recognize_google(audio,language="es")
-        except sr.UnknownValueError:
-            print("Google no entendio")
-        except sr.RequestError:
-            print("Error en la peticion")
-        print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
-        return transcription
-    
-    
     def callback_speech2text(self, req):
         """
         Input:
@@ -329,14 +257,17 @@ class SpeechUtilities:
             rospy.sleep(1)
         #Set led color to blue
         sl.setLedsColor(0,255,255)
+        rospy.sleep(1)
         # If the duration is 0, the recording will be stopped when the person stops talking
         if duration == 0:
             # Timeout if the person talking is not recognized or it takes too long
             max_timeout = 20
             t1 = time.time()
-            self.auto_cut = True
-            while not self.auto_finished and time.time()-t1<max_timeout:
-                time.sleep(0.1)
+            self.auto_cut = False
+            while not self.person_speaking and time.time()-t1<5:
+                rospy.sleep(0.1)
+            while (self.person_speaking or self.last_speaking_instance < 11) and time.time()-t1<max_timeout:
+                rospy.sleep(0.1)
             if time.time()-t1>=max_timeout:
                 print(consoleFormatter.format("Timeout reached", "FAIL"))
                 self.set_volume(70)
@@ -345,68 +276,34 @@ class SpeechUtilities:
                 print(consoleFormatter.format("Person finished talking", "OKGREEN"))
         # If the duration is not 0, the recording will be stopped after the duration
         else:
-            time.sleep(req.duration)
+            rospy.sleep(duration)
         #Set led color to white
         sl.setLedsColor(255,255,255)
         self.s2t = False
         self.auto_cut = False
         self.auto_finished = False
         self.started_talking = False
-        #Set led color to white
         self.set_volume(70)
-        # Save the audio from the speech2text buffer
-        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
-        self.speech_2_text_buffer = []
-        # Transcribe the audio
-        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
-        print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
-        return transcription
-        
-    
-    def speech2text(self):
-        """
-        Output: 
-        string transcription: transcription of the audio
-        ---
-        Returns the transcription of the audio from the microphone
-        """
-        print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
-        # Initialize a special buffer for the speech2text
-        self.set_volume(0)
-        self.speech_2_text_buffer = []
-        #Set eyes to blue
-        self.listening = True
-        self.s2t = True
-        #Set led color to blue
-        sl.setLedsColor(0,255,255)
-        # Timeout if the person talking is not recognized or it takes too long
-        max_timeout = 20
-        t1 = time.time()
-        self.auto_cut = True
-        while not self.auto_finished and time.time()-t1<max_timeout:
-            time.sleep(0.1)
-        if time.time()-t1>=max_timeout:
-            print(consoleFormatter.format("Timeout reached", "FAIL"))
-            self.set_volume(70)
-            return "Timeout reached"
+        if lang=="esp":
+            # Save the audio from the speech2text buffer
+            sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
+            # Transcribe the audio
+            transcription = sl.transcribe_spanish(self.PATH_DATA+"/speech2text.wav", self.google_recognize)
+            audioMessage = audio_tools_msg()
+            audioMessage.command = "disable"
+            audio_tools_proxy(audioMessage)
+            audioMessage = audio_tools_msg()
+            audioMessage.command = "enable"
+            rospy.sleep(1)
+            audio_tools_proxy(audioMessage)
         else:
-            print(consoleFormatter.format("Person finished talking", "OKGREEN"))
-        #Set led color to white
-        sl.setLedsColor(255,255,255)
-        self.s2t = False
-        self.auto_cut = False
-        self.auto_finished = False
-        self.started_talking = False
-        #Set led color to white
-        self.set_volume(70)
-        # Save the audio from the speech2text buffer
-        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
+            # Save the audio from the speech2text buffer
+            sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
+            # Transcribe the audio
+            transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         self.speech_2_text_buffer = []
-        # Transcribe the audio
-        transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
         return transcription
-        
     
     # ================================== HOT WORD ==================================
     def callback_hot_word_srv(self, req):
@@ -460,7 +357,7 @@ class SpeechUtilities:
         # Calculate the silence threshold, adjust the weight for the specific case for maximum amplitude and absolute mean (0.85*mean+0.15*max suggested)
         calibrated_silence_threshold = round((np.mean(np.abs(buffer))*0.9+np.max(buffer)*0.1),2)
         # calibrated_silence_threshold = np.mean(np.abs(buffer))
-        self.silence_threshold = calibrated_silence_threshold
+        self.silence_threshold = 1500
         # self.silence_threshold = round((calibrated_silence_threshold+self.constat_silence_threshold)/2,2)
         print(consoleFormatter.format(f'Constant threshold: {self.constant_silence_threshold} \n Calibrated threshold: {calibrated_silence_threshold} \n Silence threshold : {self.silence_threshold}', 'OKBLUE'))
         return self.silence_threshold
@@ -547,7 +444,7 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
-            text = self.speech2text()
+            text = self.speech2text(0,"")
             print(f"Transcription: {text}")
             counter, answer = sl.q_a_processing(text, df, req.tag, counter)
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
@@ -622,6 +519,41 @@ class SpeechUtilities:
             # When the autocut is enabled, the variable self.auto_finished will be set to True when the person stops talking
             if self.auto_cut:
                 sl.auto_cut_function(self)
+        frequency = data.frequency
+        channel_map = data.channelMap
+        audio_data = np.array(data.data, dtype=np.int16)
+        
+        # WebRTC VAD espera fragmentos de 10, 20 o 30 ms
+        vad_frame_duration = 20  # en milisegundos
+        vad_frame_size = int(frequency * vad_frame_duration / 1000)
+        
+        # Duración del frame que recibimos (170 ms)
+        frame_duration = 170  # en milisegundos
+        frame_size = int(frequency * frame_duration / 1000)
+        
+        # Asegúrate de que el buffer de audio tiene el tamaño adecuado
+        if len(audio_data) < frame_size:
+            rospy.logwarn("El tamaño del buffer de audio es menor al requerido.")
+            return
+
+        # Selecciona el primer canal de audio (mono)
+        audio_mono = audio_data[::len(channel_map)]
+
+        # Procesa el audio en subframes de 20 ms y aplica VAD
+        is_speaking = False
+        for start in range(0, frame_size, vad_frame_size):
+            end = start + vad_frame_size
+            if end <= len(audio_mono):
+                is_speaking = self.vad.is_speech(audio_mono[start:end].tobytes(), frequency)
+                if is_speaking:
+                    break
+        
+        if is_speaking:
+            self.person_speaking = True
+            self.last_speaking_instance = 0
+        else:
+            self.person_speaking = False
+            self.last_speaking_instance += 1
 
     # ================================== PEPPER ISTALKING ==================================
     def callback_check_speaking(self,data):
