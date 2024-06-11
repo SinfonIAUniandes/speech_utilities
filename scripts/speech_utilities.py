@@ -10,6 +10,8 @@ import subprocess
 import ConsoleFormatter
 import sounddevice
 import os
+import pyaudio
+import io
 import speech_library as sl
 import speech_recognition as sr
 import webrtcvad
@@ -68,6 +70,15 @@ class SpeechUtilities:
         self.whisper_model = sl.load_model("small.en")
         #Google
         self.google_recognize = sr.Recognizer()
+
+        self.p = pyaudio.PyAudio()
+
+        self.stream = self.p.open(format=pyaudio.paInt16,  
+                        channels=4,
+                        rate=48000,
+                        output=True)
+        
+        self.audio_bytes_buffer = io.BytesIO()
 
         # Inicializa el detector de actividad de voz
         self.vad = webrtcvad.Vad()
@@ -522,6 +533,9 @@ class SpeechUtilities:
         frequency = data.frequency
         channel_map = data.channelMap
         audio_data = np.array(data.data, dtype=np.int16)
+        
+        #self.stream.write(audio_data.tobytes())
+        self.audio_bytes_buffer.write(audio_data.tobytes())
         
         # WebRTC VAD espera fragmentos de 10, 20 o 30 ms
         vad_frame_duration = 20  # en milisegundos
