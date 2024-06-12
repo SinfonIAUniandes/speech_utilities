@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 import time
 import rospkg
 import rospy
@@ -16,6 +16,24 @@ import speech_library as sl
 import speech_recognition as sr
 import webrtcvad
 from openai import AzureOpenAI
+import torch
+torch.set_num_threads(1)
+import torchaudio
+
+vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                              model='silero_vad',
+                              force_reload=True)
+
+# Provided by Alexander Veysov
+def int2float(sound):
+    abs_max = np.abs(sound).max()
+    sound = sound.astype('float32')
+    if abs_max > 0:
+        sound *= 1/32768
+    sound = sound.squeeze()  # depends on the use case
+    return sound
+    
+    
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
@@ -82,7 +100,7 @@ class SpeechUtilities:
 
         # Inicializa el detector de actividad de voz
         self.vad = webrtcvad.Vad()
-        self.vad.set_mode(3)  # 0 es el menos agresivo, 3 es el más agresivo
+        self.vad.set_mode(0)  # 0 es el menos agresivo, 3 es el más agresivo
         self.person_speaking = False
         # 0 Es que recien le acaban de hablar, el numero se refiere a hace cuantos buffers fue la ultima instancia de habla
         self.last_speaking_instance = 0
@@ -219,7 +237,11 @@ class SpeechUtilities:
             audio = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
             # Send the command to the audio service
             audioMessage = audio_tools_msg()
+            audioMessage.command = "disable" if enable else "enable"
+            audio(audioMessage)
+            audioMessage = audio_tools_msg()
             audioMessage.command = command
+            rospy.sleep(1)
             audio(audioMessage)
             return True
         
@@ -277,12 +299,12 @@ class SpeechUtilities:
             self.auto_cut = False
             while not self.person_speaking and time.time()-t1<5:
                 rospy.sleep(0.1)
-            while (self.person_speaking or self.last_speaking_instance < 11) and time.time()-t1<max_timeout:
+            print(consoleFormatter.format("Person started talking", "OKGREEN"))
+            while (self.person_speaking or self.last_speaking_instance < 10) and time.time()-t1<max_timeout:
                 rospy.sleep(0.1)
+                t1 = time.time()
             if time.time()-t1>=max_timeout:
                 print(consoleFormatter.format("Timeout reached", "FAIL"))
-                self.set_volume(70)
-                return "Timeout reached"
             else:
                 print(consoleFormatter.format("Person finished talking", "OKGREEN"))
         # If the duration is not 0, the recording will be stopped after the duration
@@ -534,9 +556,6 @@ class SpeechUtilities:
         channel_map = data.channelMap
         audio_data = np.array(data.data, dtype=np.int16)
         
-        #self.stream.write(audio_data.tobytes())
-        self.audio_bytes_buffer.write(audio_data.tobytes())
-        
         # WebRTC VAD espera fragmentos de 10, 20 o 30 ms
         vad_frame_duration = 20  # en milisegundos
         vad_frame_size = int(frequency * vad_frame_duration / 1000)
@@ -561,8 +580,12 @@ class SpeechUtilities:
                 is_speaking = self.vad.is_speech(audio_mono[start:end].tobytes(), frequency)
                 if is_speaking:
                     break
+        audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
+
+        audio_float32 = int2float(audio_int16)
         
-        if is_speaking:
+        new_confidence = vad_model(torch.from_numpy(audio_float32), 48000).item()
+        if new_confidence>0.6:
             self.person_speaking = True
             self.last_speaking_instance = 0
         else:
