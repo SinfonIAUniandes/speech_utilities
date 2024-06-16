@@ -152,7 +152,7 @@ def gpt(client,messages,temperature):
     This function is used to make a request to the GPT model given a list of dictionaries
     """
     prediction = client.chat.completions.create(
-        model="sinfoniaOpenai", 
+        model="GPT-4o", 
         messages=messages, 
         temperature=temperature, 
         max_tokens=100
