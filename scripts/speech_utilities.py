@@ -16,12 +16,24 @@ from openai import AzureOpenAI
 import torch
 torch.set_num_threads(1)
 
+repo_or_dir = 'snakers4/silero-vad'
+model_name = 'silero_vad'
+model_dir = torch.hub.get_dir()
 
-vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                              model='silero_vad',
-                              force_reload=True)
+model_exists = False
+try:
+    vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir,
+                                      model=model_name,
+                                      force_reload=False)
+    model_exists = True
+except Exception as e:
+    print(f"Modelo no encontrado localmente, descargando: {e}")
 
-# Provided by Alexander Veysov
+if not model_exists:
+    vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir,
+                                      model=model_name,
+                                      force_reload=True)
+
 def int2float(sound):
     abs_max = np.abs(sound).max()
     sound = sound.astype('float32')
