@@ -47,6 +47,7 @@ def transcribe(file_path, model):
     Use the local version of whisper for transcribing short audios
     """
     t1 = float(time.perf_counter() * 1000)
+    torch.cuda.empty_cache()
     result = model.transcribe(file_path)
     torch.cuda.empty_cache()
     t2 = float(time.perf_counter() * 1000)

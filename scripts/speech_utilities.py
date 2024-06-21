@@ -10,15 +10,12 @@ import subprocess
 import ConsoleFormatter
 import sounddevice
 import os
-import pyaudio
-import io
 import speech_library as sl
 import speech_recognition as sr
-import webrtcvad
 from openai import AzureOpenAI
 import torch
 torch.set_num_threads(1)
-import torchaudio
+
 
 vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                               model='silero_vad',
@@ -39,8 +36,10 @@ def int2float(sound):
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
 
 # Robot_msgs
-from robot_toolkit_msgs.srv import audio_tools_srv, misc_tools_srv, set_speechrecognition_srv, set_words_threshold_srv, set_output_volume_srv
+from robot_toolkit_msgs.srv import audio_tools_srv, misc_tools_srv, set_speechrecognition_srv, set_words_threshold_srv, set_output_volume_srv, battery_service_srv
 from robot_toolkit_msgs.msg import audio_tools_msg, speech_msg, text_to_speech_status_msg, misc_tools_msg, text_to_speech_status_msg
+
+from std_srvs.srv import SetBool
 
 # Naoqi_msgs
 from naoqi_bridge_msgs.msg import AudioBuffer
@@ -88,23 +87,14 @@ class SpeechUtilities:
         self.whisper_model = sl.load_model("small.en")
         #Google
         self.google_recognize = sr.Recognizer()
-
-        self.p = pyaudio.PyAudio()
-
-        self.stream = self.p.open(format=pyaudio.paInt16,  
-                        channels=4,
-                        rate=48000,
-                        output=True)
-        
-        self.audio_bytes_buffer = io.BytesIO()
-
-        # Inicializa el detector de actividad de voz
-        self.vad = webrtcvad.Vad()
-        self.vad.set_mode(0)  # 0 es el menos agresivo, 3 es el más agresivo
         self.person_speaking = False
         # 0 Es que recien le acaban de hablar, el numero se refiere a hace cuantos buffers fue la ultima instancia de habla
         self.last_speaking_instance = 0
+        
+        self.rospy_check = threading.Thread(target=self.check_rospy)
+        self.rospy_check.start()
 
+        
         # OpenAI GPT Model
         self.clientGPT = AzureOpenAI(
             azure_endpoint= "https://sinfonia.openai.azure.com/",
@@ -165,6 +155,9 @@ class SpeechUtilities:
             rospy.wait_for_service("/pytoolkit/ALAudioDevice/set_output_volume_srv")
             self.set_volume = rospy.ServiceProxy("/pytoolkit/ALAudioDevice/set_output_volume_srv", set_output_volume_srv)
 
+            print(consoleFormatter.format("Waiting for pytoolkit/ALAutonomousBlinking/toggle_blinking_srv...", "WARNING"))
+            rospy.wait_for_service("/pytoolkit/ALAutonomousBlinking/toggle_blinking_srv")
+            self.toggle_blinking = rospy.ServiceProxy("/pytoolkit/ALAutonomousBlinking/toggle_blinking_srv", SetBool)
 
             # Subscriber Service Speech Recognition
             print(consoleFormatter.format('Waiting for /pytoolkit/ALTextToSpeech/status...', 'WARNING'))
@@ -274,6 +267,7 @@ class SpeechUtilities:
         Returns the transcription of the audio from the microphone
         """
         print(consoleFormatter.format("Requested sppech2text service!", "OKGREEN"))
+        self.toggle_blinking(False)
         # Initialize a special buffer for the speech2text
         self.set_volume(0)
         self.speech_2_text_buffer = []
@@ -300,7 +294,7 @@ class SpeechUtilities:
             while not self.person_speaking and time.time()-t1<5:
                 rospy.sleep(0.1)
             print(consoleFormatter.format("Person started talking", "OKGREEN"))
-            while (self.person_speaking or self.last_speaking_instance < 10) and time.time()-t1<max_timeout:
+            while (self.person_speaking or self.last_speaking_instance < 13) and time.time()-t1<max_timeout:
                 rospy.sleep(0.1)
                 t1 = time.time()
             if time.time()-t1>=max_timeout:
@@ -335,6 +329,7 @@ class SpeechUtilities:
             # Transcribe the audio
             transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
         self.speech_2_text_buffer = []
+        self.toggle_blinking(True)
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
         return transcription
     
@@ -477,7 +472,12 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
-            text = self.speech2text(0,"")
+            text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
+            if req.tag=="drink":
+                if ("so that" in text or "so then" in text or "solar" in text or "so" in text):
+                    text = "soda"
+                elif ("cock" in text):
+                    text = "coke"
             print(f"Transcription: {text}")
             counter, answer = sl.q_a_processing(text, df, req.tag, counter)
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
@@ -537,6 +537,13 @@ class SpeechUtilities:
         self.audio_pub.publish(audio_msg)
 
     # ================================== PEPPER AUDIO  ==================================
+    
+    def check_rospy(self):
+        while not rospy.is_shutdown():
+            rospy.sleep(0.1)
+        print(consoleFormatter.format("Shutting down", "FAIL"))
+        os._exit(os.EX_OK)
+        
     def audioCallbackSingleChannel(self, data):
         """
         Callback function for the /mic topic
@@ -549,41 +556,9 @@ class SpeechUtilities:
             # When the speech2text is enabled, the variable self.speech_2_text_buffer will be filled with the audio data
             if self.s2t:
                 self.speech_2_text_buffer.extend(data.data)
-            # When the autocut is enabled, the variable self.auto_finished will be set to True when the person stops talking
-            if self.auto_cut:
-                sl.auto_cut_function(self)
-        frequency = data.frequency
-        channel_map = data.channelMap
         audio_data = np.array(data.data, dtype=np.int16)
-        
-        # WebRTC VAD espera fragmentos de 10, 20 o 30 ms
-        vad_frame_duration = 20  # en milisegundos
-        vad_frame_size = int(frequency * vad_frame_duration / 1000)
-        
-        # Duración del frame que recibimos (170 ms)
-        frame_duration = 170  # en milisegundos
-        frame_size = int(frequency * frame_duration / 1000)
-        
-        # Asegúrate de que el buffer de audio tiene el tamaño adecuado
-        if len(audio_data) < frame_size:
-            rospy.logwarn("El tamaño del buffer de audio es menor al requerido.")
-            return
-
-        # Selecciona el primer canal de audio (mono)
-        audio_mono = audio_data[::len(channel_map)]
-
-        # Procesa el audio en subframes de 20 ms y aplica VAD
-        is_speaking = False
-        for start in range(0, frame_size, vad_frame_size):
-            end = start + vad_frame_size
-            if end <= len(audio_mono):
-                is_speaking = self.vad.is_speech(audio_mono[start:end].tobytes(), frequency)
-                if is_speaking:
-                    break
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
-
         audio_float32 = int2float(audio_int16)
-        
         new_confidence = vad_model(torch.from_numpy(audio_float32), 48000).item()
         if new_confidence>0.6:
             self.person_speaking = True
