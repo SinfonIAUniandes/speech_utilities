@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3.11
 import time
 import rospkg
 import rospy
@@ -485,11 +485,19 @@ class SpeechUtilities:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
             text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
+            if len(text)<2:
+                counter += 1
+                continue
             if req.tag=="drink":
-                if ("so that" in text or "so then" in text or "solar" in text or "so" in text):
+                if ("so" in text):
                     text = "soda"
                 elif ("cock" in text):
                     text = "coke"
+                elif ("kofi" in text):
+                    text = "coffee"
+            if req.tag=="name":
+                if ("baby" in text):
+                    text = "david"
             print(f"Transcription: {text}")
             counter, answer = sl.q_a_processing(text, df, req.tag, counter)
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
