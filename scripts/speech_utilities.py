@@ -22,27 +22,13 @@ model_dir = torch.hub.get_dir()
 
 model_exists = False
 try:
-    vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir,
-                                      model=model_name,
-                                      force_reload=False)
+    vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir, model=model_name, force_reload=False)
     model_exists = True
 except Exception as e:
     print(f"Modelo no encontrado localmente, descargando: {e}")
 
 if not model_exists:
-    vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir,
-                                      model=model_name,
-                                      force_reload=True)
-
-def int2float(sound):
-    abs_max = np.abs(sound).max()
-    sound = sound.astype('float32')
-    if abs_max > 0:
-        sound *= 1/32768
-    sound = sound.squeeze()  # depends on the use case
-    return sound
-    
-    
+    vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir, model=model_name, force_reload=True)
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
@@ -111,7 +97,7 @@ class SpeechUtilities:
         self.clientGPT = AzureOpenAI(
             azure_endpoint= "https://sinfonia.openai.azure.com/",
             api_key= os.getenv("GPT_API"),
-            api_version="2023-05-15",
+            api_version="2024-02-01",
         )
 
         # ================================== IF LOCAL ==================================
@@ -271,7 +257,7 @@ class SpeechUtilities:
         transcription = self.speech2text(req.duration, req.lang)
         return transcription
     
-    def speech2text(self, duration, lang):
+    def speech2text(self, duration, lang=""):
         """
         Output: 
         string transcription: transcription of the audio
@@ -339,7 +325,8 @@ class SpeechUtilities:
             # Save the audio from the speech2text buffer
             sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
             # Transcribe the audio
-            transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model)
+            # transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model) # ANTES
+            transcription = sl.transcribe_cloud(self.PATH_DATA+"/speech2text.wav", self.clientGPT) # Ahora se transcribe cloud con Azure
         self.speech_2_text_buffer = []
         self.toggle_blinking(True)
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
@@ -484,14 +471,15 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", False)
             rospy.sleep(1)
-            text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
+            text = self.speech2text(0)
             if req.tag=="drink":
                 if ("so that" in text or "so then" in text or "solar" in text or "so" in text):
                     text = "soda"
                 elif ("cock" in text):
                     text = "coke"
             print(f"Transcription: {text}")
-            counter, answer = sl.q_a_processing(text, df, req.tag, counter)
+            # counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
+            counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
         return answer
 
@@ -509,12 +497,12 @@ class SpeechUtilities:
         """
         print(consoleFormatter.format("Requested answer service!", "OKGREEN"))
         print(consoleFormatter.format(f"Question: {req.question}", "WARNING"))
-        system_msg = f"""You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, 
-        specially from the research group SinfonIA, you serve as a Social Robot and you are able 
-        to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.
-        You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.
-        Answer all questions in the most accurate but nice way possible. {req.system_msg}""" 
         if not req.save_conversation:
+            system_msg = f"""You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, 
+            specially from the research group SinfonIA, you serve as a Social Robot and you are able 
+            to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.
+            You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.
+            Answer all questions in the most accurate but nice way possible. {req.system_msg}""" 
             self.conversation_gpt = [{"role":"system","content":system_msg}]
         self.conversation_gpt.append({"role":"user","content":req.question})
         response = sl.gpt(self.clientGPT, self.conversation_gpt,req.temperature)
@@ -570,7 +558,7 @@ class SpeechUtilities:
                 self.speech_2_text_buffer.extend(data.data)
         audio_data = np.array(data.data, dtype=np.int16)
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
-        audio_float32 = int2float(audio_int16)
+        audio_float32 = sl.int2float(audio_int16)
         new_confidence = vad_model(torch.from_numpy(audio_float32), 48000).item()
         if new_confidence>0.6:
             self.person_speaking = True

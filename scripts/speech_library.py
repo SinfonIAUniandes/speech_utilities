@@ -54,6 +54,24 @@ def transcribe(file_path, model):
     print("Local [ms]: ", float(t2-t1))
     return result["text"]
 
+def transcribe_cloud(file_path, client):
+    """
+    Input:
+    file_path: path of the .wav file to transcribe
+    client: AzureOpenAI's client instance to transcribe the audio
+    ---
+    Output:
+    response of the cloud model with the transcription of the audio
+    ---
+    Use the cloud version of whisper for transcribing short audios
+    """
+    audio_file = open(file_path, "rb")
+    result = client.audio.transcriptions.create(
+        model = "whisper",
+        file = audio_file,
+    )
+    return result.text
+
 def transcribe_spanish(file_path, model):
     """
     Input:
@@ -209,6 +227,7 @@ def q_a_processing(text, df, tag, counter):
     category = df.at[tag, 'category'].split(',')
     posible = df.at[tag, 'posible'].split(',')
     no_wanted = df.at[tag, 'no_wanted'].split(',')
+    text = text.lower().replace(".","").replace("!","").replace("?","") # Remove punctuation
     etiquetas = nltk_processing(text)[1]
     possible_responses = []
     for tuple in etiquetas:
@@ -220,6 +239,85 @@ def q_a_processing(text, df, tag, counter):
         counter += 1
     else:
         answer = "".join(response)
+        counter = 4
+    return counter, answer
+
+def q_a_gpt(client, question, transcription, counter):
+    """
+    Input:
+    client: AzureOpenAI's client instance to process the question
+    question: the question to be answered
+    transcription: the transcription of the response
+    counter: the int that keeps track of how many times we have processed a question
+    ---
+    Output:
+    Tuple with the counter updated and the answer filtered
+    ---
+    Using the client given by parameter look for the answer of the question
+    """
+    prompt = """
+        You are an assistant that processes transcribed audio responses. Your task is to interpret the context, correct any transcription errors, and provide the main corrected response concisely. If you cannot determine a logical response to the question from the given transcription, respond only with "Retry".
+
+        Here are some examples of how you should interpret the responses:
+
+        Example 1:
+        Question: "What is your favorite drink?"
+        Transcribed Response: "My favorite drink is so that"
+        Corrected Main Response: "Soda"
+
+        Example 2:
+        Question: "How old are you?"
+        Transcribed Response: "I am twenty one years old"
+        Corrected Main Response: "21"
+
+        Example 3:
+        Question: "What is your name?"
+        Transcribed Response: "I call myself John"
+        Corrected Main Response: "John"
+
+        Example 4:
+        Question: "Where do you live?"
+        Transcribed Response: "I reside in New Yolk"
+        Corrected Main Response: "New York"
+
+        Example 5:
+        Question: "What is your favorite food?"
+        Transcribed Response: "My favorite food is pizzar"
+        Corrected Main Response: "Pizza"
+
+        Example 6:
+        Question: "What is your favorite movie?"
+        Transcribed Response: "My favorite movie is The Lord of the Reigns"
+        Corrected Main Response: "The Lord of the Rings"
+
+        Example 7:
+        Question: "What is your job?"
+        Transcribed Response: "I am a software developerr"
+        Corrected Main Response: "Software Developer"
+        """
+    
+    interaction = f"""
+        Please follow this format to process the following question and transcribed response. If you cannot determine a logical response, respond only with "Retry":
+
+        Question: "{question}"
+        Transcribed Response: "{transcription}"
+        Corrected Main Response:
+    """
+
+    prediction = client.chat.completions.create(
+        model="GPT-4o", 
+        messages=[{"role":"system","content":prompt}, {"role":"user","content":interaction}], 
+        temperature=0.5, 
+        max_tokens=100
+    )
+
+    response = prediction.choices[0].message.content
+
+    if response == "Retry": 
+        answer = ""
+        counter += 1
+    else:
+        answer = response
         counter = 4
     return counter, answer
     
@@ -241,3 +339,11 @@ def word_to_sec(text, wpm):
     time = ((n_tokens/wpm)*c_1) + c_3
     c_2 = (time/65)
     return time + c_2
+
+def int2float(sound):
+    abs_max = np.abs(sound).max()
+    sound = sound.astype('float32')
+    if abs_max > 0:
+        sound *= 1/32768
+    sound = sound.squeeze()  # depends on the use case
+    return sound
