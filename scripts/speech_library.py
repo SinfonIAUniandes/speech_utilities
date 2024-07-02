@@ -170,16 +170,23 @@ def gpt(client,messages,temperature):
     ---
     This function is used to make a request to the GPT model given a list of dictionaries
     """
-    prediction = client.chat.completions.create(
-        model="GPT-4o", 
-        messages=messages, 
-        temperature=temperature, 
-        max_tokens=100
-    )
-    response = {
-        "content": prediction.choices[0].message.content,
-        "role": prediction.choices[0].message.role,
-    }
+    try:
+        prediction = client.chat.completions.create(
+            model="GPT-4o", 
+            messages=messages, 
+            temperature=temperature, 
+            max_tokens=500
+        )
+        print()
+        response = {
+            "content": prediction.choices[0].message.content,
+            "role": prediction.choices[0].message.role,
+        }
+    except:
+        response = {
+            "content": "Disculpa, no puedo responder eso",
+            "role": "error",
+        }
     return response
 
 def nltk_processing(text):

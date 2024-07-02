@@ -20,14 +20,10 @@ repo_or_dir = 'snakers4/silero-vad'
 model_name = 'silero_vad'
 model_dir = torch.hub.get_dir()
 
-model_exists = False
 try:
     vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir, model=model_name, force_reload=False)
-    model_exists = True
 except Exception as e:
     print(f"Modelo no encontrado localmente, descargando: {e}")
-
-if not model_exists:
     vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir, model=model_name, force_reload=True)
 
 # Speech_msgs
@@ -62,24 +58,38 @@ class SpeechUtilities:
         self.listening = False
         self.audio_chunk =[]
         self.audio_buffer = []
-        self.sample_rate =200000
+        self.sample_rate =48000
         self.s2t =False
 
         # Autocut variables
         self.auto_cut = False
         self.times_below_threshold = 0
         self.times_above_threshold =0
-        self.constant_silence_threshold = 3700
-        self.silence_threshold = self.constant_silence_threshold
         self.auto_finished = False
         self.speech_2_text_buffer = []
         self.started_talking = False
 
         # Answer variables
-        self.conversation_gpt = [{"role":"system","content":"You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory. Answer all questions in the most accurate but nice way possible. "}]
+        self.info_herramientas = """
+        Your main programming language is Python, with some parts in C++. You operate thanks to ROS (Robot Operating System), which allows different computers to communicate and transfer real-time information about your surroundings, enabling you to act in the best possible way.
+
+        Your code is distributed across six main tools:
+
+        Toolkit: This tool develops the connection between you and ROS, providing all the necessary functions to the other tools in C++.
+
+        Speech: This tool uses artificial intelligence to process audio and natural language, allowing you to understand what people say and respond appropriately.
+
+        Interface: This tool handles your tablet and graphical interfaces using JavaScript and WebSockets for high-speed communication.
+
+        Perception: This tool utilizes your cameras for computer vision, helping you recognize your surroundings, using tools like torch, cuda and YOLO.
+
+        Navigation: This tool enables you to navigate intelligently and quickly in known and unknown environments, avoiding harm to yourself and others.
+
+        Manipulation: This tool controls your arms and body, allowing you to manipulate objects intelligently."""
+        self.conversation_gpt = [{"role":"system","content":f"You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.{self.info_herramientas} Answer all questions in the most accurate but nice way possible. "}]
 
         # isTalking variable
-        self.isTalking = False
+        self.robot_speaking = False
 
         # Whisper Model
         self.whisper_model = sl.load_model("small.en")
@@ -127,11 +137,11 @@ class SpeechUtilities:
 
             # Custom speech parameters for robot
             self.customSpeech = audio_tools_msg()
-            self.customSpeech.command = "set_speech_params"
-            self.customSpeech.speech_parameters.pitch_shift=1 # Grueso (1) o Agudo (2)
-            self.customSpeech.speech_parameters.double_voice_level= 0.0
-            self.customSpeech.speech_parameters.double_voice_time_shift= 0.0
-            self.customSpeech.speech_parameters.speed= 120.0 # Velocidad al hablar
+            self.customSpeech.command = "enable"
+            #self.customSpeech.speech_parameters.pitch_shift=1 # Grueso (1) o Agudo (2)
+            #self.customSpeech.speech_parameters.double_voice_level= 0.0
+            #self.customSpeech.speech_parameters.double_voice_time_shift= 0.0
+            #self.customSpeech.speech_parameters.speed= 120.0 # Velocidad al hablar
             self.audioToolsService(self.customSpeech)
 
             # Enable mic
@@ -178,10 +188,6 @@ class SpeechUtilities:
         print(consoleFormatter.format('waiting for hot_word_srv service!', 'WARNING'))  
         self.hot_word_declaration= rospy.Service("speech_utilities/hot_word_srv", hot_word_srv , self.callback_hot_word_srv)
         print(consoleFormatter.format('hot_word_srv on!', 'OKGREEN'))
-
-        print(consoleFormatter.format('waiting for calibrate_srv service!', 'WARNING'))  
-        self.calibrate_declaration= rospy.Service("speech_utilities/calibrate_srv", calibrate_srv , self.callback_calibrate)
-        print(consoleFormatter.format('calibrate_srv on!', 'OKGREEN'))
 
         print(consoleFormatter.format('waiting for talk service!', 'WARNING'))  
         self.talk_declaration= rospy.Service("speech_utilities/talk_srv", talk_srv, self.callback_talk)
@@ -273,6 +279,7 @@ class SpeechUtilities:
         self.listening = True
         self.s2t = True
         if lang=="esp":
+            self.sample_rate = 16000
             audio_tools_proxy = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
             audioMessage = audio_tools_msg()
             audioMessage.command = "custom"
@@ -280,6 +287,8 @@ class SpeechUtilities:
             audioMessage.channels = 3
             audio_tools_proxy(audioMessage)
             rospy.sleep(1)
+        else:
+            self.sample_rate = 48000
         #Set led color to blue
         sl.setLedsColor(0,255,255)
         rospy.sleep(1)
@@ -292,7 +301,7 @@ class SpeechUtilities:
             while not self.person_speaking and time.time()-t1<5:
                 rospy.sleep(0.1)
             print(consoleFormatter.format("Person started talking", "OKGREEN"))
-            while (self.person_speaking or self.last_speaking_instance < 13) and time.time()-t1<max_timeout:
+            while (self.person_speaking or self.last_speaking_instance < 30) and time.time()-t1<max_timeout:
                 rospy.sleep(0.1)
                 t1 = time.time()
             if time.time()-t1>=max_timeout:
@@ -309,11 +318,10 @@ class SpeechUtilities:
         self.auto_finished = False
         self.started_talking = False
         self.set_volume(70)
+        # Save the audio from the speech2text buffer
+        sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
         if lang=="esp":
-            # Save the audio from the speech2text buffer
-            sl.save_recording(self.speech_2_text_buffer,"speech2text",16000)
             # Transcribe the audio
-            transcription = sl.transcribe_spanish(self.PATH_DATA+"/speech2text.wav", self.google_recognize)
             audioMessage = audio_tools_msg()
             audioMessage.command = "disable"
             audio_tools_proxy(audioMessage)
@@ -321,14 +329,14 @@ class SpeechUtilities:
             audioMessage.command = "enable"
             rospy.sleep(1)
             audio_tools_proxy(audioMessage)
+            transcription = sl.transcribe_spanish(self.PATH_DATA+"/speech2text.wav", self.google_recognize)
         else:
-            # Save the audio from the speech2text buffer
-            sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
             # Transcribe the audio
-            # transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model) # ANTES
-            transcription = sl.transcribe_cloud(self.PATH_DATA+"/speech2text.wav", self.clientGPT) # Ahora se transcribe cloud con Azure
+            transcription = sl.transcribe(self.PATH_DATA+"/speech2text.wav", self.whisper_model) # ANTES
+            #transcription = sl.transcribe_cloud(self.PATH_DATA+"/speech2text.wav", self.clientGPT) # Ahora se transcribe cloud con Azure
         self.speech_2_text_buffer = []
         self.toggle_blinking(True)
+        self.listening = False
         print(consoleFormatter.format(f"Local listened: {transcription}", "OKGREEN"))
         return transcription
     
@@ -363,32 +371,6 @@ class SpeechUtilities:
             print(consoleFormatter.format("No Toolkit available", "FAIL"))
         return response
 
-    # ================================== CALIBRATE ==================================
-    def callback_calibrate(self, req):
-        """
-        Input:
-        int32 duration: duration of the recording in seconds
-        ---
-        Output:
-        float64 threshold: silence threshold
-        ----------
-        Returns the silence threshold of the audio from the microphone
-        """
-        print(consoleFormatter.format("Requested calibrate service!", "OKGREEN"))
-        # Empty the audio buffer
-        self.audio_buffer = []
-        self.listening = True
-        rospy.sleep(req.duration)
-        self.listening = False
-        buffer = self.audio_buffer
-        # Calculate the silence threshold, adjust the weight for the specific case for maximum amplitude and absolute mean (0.85*mean+0.15*max suggested)
-        calibrated_silence_threshold = round((np.mean(np.abs(buffer))*0.9+np.max(buffer)*0.1),2)
-        # calibrated_silence_threshold = np.mean(np.abs(buffer))
-        self.silence_threshold = 1500
-        # self.silence_threshold = round((calibrated_silence_threshold+self.constat_silence_threshold)/2,2)
-        print(consoleFormatter.format(f'Constant threshold: {self.constant_silence_threshold} \n Calibrated threshold: {calibrated_silence_threshold} \n Silence threshold : {self.silence_threshold}', 'OKBLUE'))
-        return self.silence_threshold
-
     # ================================== TALK ==================================
     def callback_talk(self, req):
         """
@@ -406,22 +388,10 @@ class SpeechUtilities:
             req.talk_speed = 100
         if self.ROS:
             text = f"\\rspd={req.talk_speed}\\{req.key}"
-            self.talk(text,req.language,req.animated)
-        print(consoleFormatter.format("Talking...","WARNING"))
-        if req.wait:
-            t1 = float(time.perf_counter() * 1000)
-            timeout = sl.word_to_sec(req.key, float(req.talk_speed))
-            self.isTalking=True
-            while self.isTalking:
-                rospy.sleep(0.05)
-                elapsed = float(time.perf_counter() * 1000)
-                if (float(elapsed-t1))/1000 >= timeout:
-                    break
-            self.isTalking=False
-        print(consoleFormatter.format(f"Pepper said: {req.key}","OKGREEN"))
+            self.talk(text,req.language,req.animated,wait=req.wait)
         return f"Pepper said: {req.key}"
     
-    def talk(self,key,language,animated):
+    def talk(self,key,language,animated,wait):
         """
         Input:
         string key: Indicates the phrase that the robot must say
@@ -437,15 +407,16 @@ class SpeechUtilities:
         t2s_msg.text = key
         self.speech_pub.publish(t2s_msg)
         print(consoleFormatter.format("Talking...","WARNING"))
-        t1 = float(time.perf_counter() * 1000)
-        timeout = sl.word_to_sec(key, 100)
-        self.isTalking=True
-        while self.isTalking:
-            rospy.sleep(0.05)
-            elapsed = float(time.perf_counter() * 1000)
-            if (float(elapsed-t1))/1000 >= timeout:
-                break
-        self.isTalking=False
+        if wait:
+            t1 = float(time.perf_counter() * 1000)
+            timeout = sl.word_to_sec(key, 100)
+            self.robot_speaking=True
+            while self.robot_speaking:
+                rospy.sleep(0.05)
+                elapsed = float(time.perf_counter() * 1000)
+                if (float(elapsed-t1))/1000 >= timeout:
+                    break
+            self.robot_speaking=False
         key = key.replace("\\rspd=100\\","")
         print(consoleFormatter.format(f"Pepper said: {key}","OKGREEN"))
         
@@ -469,8 +440,7 @@ class SpeechUtilities:
             return "Invalid Tag"
         counter = 0
         while counter < 3:
-            self.talk(question_value, "English", False)
-            rospy.sleep(1)
+            self.talk(question_value, "English", animated=False, wait=True)
             text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
             if len(text)<2:
                 counter += 1
@@ -485,9 +455,11 @@ class SpeechUtilities:
             if req.tag=="name":
                 if ("baby" in text):
                     text = "david"
+                if ("job" in text or "done" in text):
+                    text = "john"
             print(f"Transcription: {text}")
-            # counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
-            counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
+            counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
+            #counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
         return answer
 
@@ -509,12 +481,22 @@ class SpeechUtilities:
             system_msg = f"""You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, 
             specially from the research group SinfonIA, you serve as a Social Robot and you are able 
             to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.
-            You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.
+            You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.{self.info_herramientas}
             Answer all questions in the most accurate but nice way possible. {req.system_msg}""" 
             self.conversation_gpt = [{"role":"system","content":system_msg}]
         self.conversation_gpt.append({"role":"user","content":req.question})
         response = sl.gpt(self.clientGPT, self.conversation_gpt,req.temperature)
-        if "content" in response:
+        print(self.conversation_gpt)
+        if "role" in response:
+            if response["role"] =="error":
+                self.conversation_gpt.pop()
+                print(self.conversation_gpt)
+                self.clientGPT = AzureOpenAI(
+                    azure_endpoint= "https://sinfonia.openai.azure.com/",
+                    api_key= os.getenv("GPT_API"),
+                    api_version="2024-02-01",
+                )
+        elif "content" in response:
             answer = response["content"]
             print(consoleFormatter.format(f"Response: {answer}", "OKBLUE"))
             self.conversation_gpt.append(response)
@@ -567,8 +549,8 @@ class SpeechUtilities:
         audio_data = np.array(data.data, dtype=np.int16)
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
         audio_float32 = sl.int2float(audio_int16)
-        new_confidence = vad_model(torch.from_numpy(audio_float32), 48000).item()
-        if new_confidence>0.6:
+        new_confidence = vad_model(torch.from_numpy(audio_float32), self.sample_rate).item()
+        if new_confidence>0.57:
             self.person_speaking = True
             self.last_speaking_instance = 0
         else:
@@ -582,9 +564,9 @@ class SpeechUtilities:
         data.data (str): string saying if the robot is speaking
         """
         if data.status == "done":
-            self.isTalking = False
+            self.robot_speaking = False
         else:
-            self.isTalking = True
+            self.robot_speaking = True
 # ================================== MAIN ==================================
 
 if __name__ == '__main__':
