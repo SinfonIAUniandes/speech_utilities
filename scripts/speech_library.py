@@ -105,7 +105,7 @@ def load_model(model_size = "small"):
         print("Model not found, downloading it")
         in_memory = False
     model_whisp = whisper.load_model(model_size, in_memory= in_memory, download_root = PATH_DATA)
-    return model_whisp
+    return model_whisp, device
 
 def save_recording(buffer,file_name,sample_rate):
     """
@@ -177,7 +177,6 @@ def gpt(client,messages,temperature):
             temperature=temperature, 
             max_tokens=500
         )
-        print()
         response = {
             "content": prediction.choices[0].message.content,
             "role": prediction.choices[0].message.role,

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 import time
 import rospkg
 import rospy
@@ -77,22 +77,22 @@ class SpeechUtilities:
 
         Toolkit: This tool develops the connection between you and ROS, providing all the necessary functions to the other tools in C++.
 
-        Speech: This tool uses artificial intelligence to process audio and natural language, allowing you to understand what people say and respond appropriately.
+        Speech: This tool uses artificial intelligence to process audio and natural language, allowing you to understand what people say and respond appropriately, using tools like Multimodal LLM's and speech to text models.
 
         Interface: This tool handles your tablet and graphical interfaces using JavaScript and WebSockets for high-speed communication.
 
         Perception: This tool utilizes your cameras for computer vision, helping you recognize your surroundings, using tools like torch, cuda and YOLO.
 
-        Navigation: This tool enables you to navigate intelligently and quickly in known and unknown environments, avoiding harm to yourself and others.
+        Navigation: This tool enables you to navigate intelligently and quickly in known and unknown environments, avoiding harm to yourself and others, for this you use the ROS Navigation Stack and your sensors: laser, sonar, gyroscope, accelerometer.
 
-        Manipulation: This tool controls your arms and body, allowing you to manipulate objects intelligently."""
-        self.conversation_gpt = [{"role":"system","content":f"You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.{self.info_herramientas} Answer all questions in the most accurate but nice way possible. "}]
+        Manipulation: This tool controls your arms and body, allowing you to manipulate objects intelligently using your touch sensors."""
+        self.conversation_gpt = [{"role":"system","content":f"You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.{self.info_herramientas} Answer all questions in the most accurate but nice way possible. Your response will be said by a robot, so please do not add any content that may be difficult to read, like code or math, just explain it. SinfonIA has an instagram account, it is @sinfonia_uniandes"}]
 
         # isTalking variable
         self.robot_speaking = False
 
         # Whisper Model
-        self.whisper_model = sl.load_model("small.en")
+        self.whisper_model,self.device = sl.load_model("small.en")
         #Google
         self.google_recognize = sr.Recognizer()
         self.person_speaking = False
@@ -482,24 +482,23 @@ class SpeechUtilities:
             specially from the research group SinfonIA, you serve as a Social Robot and you are able 
             to perform tasks such as guiding, answering questions, recognizing objects, people and faces, among others.
             You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.{self.info_herramientas}
-            Answer all questions in the most accurate but nice way possible. {req.system_msg}""" 
+            Answer all questions in the most accurate but nice way possible.  Your response will be said by a robot, so please do not add any content that may be difficult to read, like code or math, just explain it. . SinfonIA has an instagram account, it is @sinfonia_uniandes {req.system_msg}""" 
             self.conversation_gpt = [{"role":"system","content":system_msg}]
         self.conversation_gpt.append({"role":"user","content":req.question})
         response = sl.gpt(self.clientGPT, self.conversation_gpt,req.temperature)
-        print(self.conversation_gpt)
-        if "role" in response:
+        if "content" in response and "role" in response:
             if response["role"] =="error":
                 self.conversation_gpt.pop()
-                print(self.conversation_gpt)
                 self.clientGPT = AzureOpenAI(
                     azure_endpoint= "https://sinfonia.openai.azure.com/",
                     api_key= os.getenv("GPT_API"),
                     api_version="2024-02-01",
                 )
-        elif "content" in response:
+                sl.gpt(self.clientGPT, self.conversation_gpt,req.temperature)
+            else:
+                self.conversation_gpt.append(response)
             answer = response["content"]
             print(consoleFormatter.format(f"Response: {answer}", "OKBLUE"))
-            self.conversation_gpt.append(response)
             if answer== "": 
                 answer = "I could not find relevant results for your question "
         else:
@@ -549,7 +548,13 @@ class SpeechUtilities:
         audio_data = np.array(data.data, dtype=np.int16)
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
         audio_float32 = sl.int2float(audio_int16)
-        new_confidence = vad_model(torch.from_numpy(audio_float32), self.sample_rate).item()
+        if self.device == "cpu":
+            self.sample_rate = 16000
+            num_samples = 512 if self.sample_rate == 16000 else 256
+            audio_rescaled = torch.from_numpy(audio_float32[:num_samples])
+        else:
+            audio_rescaled = torch.from_numpy(audio_float32)
+        new_confidence = vad_model(audio_rescaled, self.sample_rate).item()
         if new_confidence>0.57:
             self.person_speaking = True
             self.last_speaking_instance = 0
