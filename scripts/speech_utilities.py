@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 import time
 import rospkg
 import rospy
@@ -58,7 +58,7 @@ class SpeechUtilities:
         self.listening = False
         self.audio_chunk =[]
         self.audio_buffer = []
-        self.sample_rate =48000
+        self.sample_rate = 200000
         self.s2t =False
 
         # Autocut variables
@@ -139,10 +139,6 @@ class SpeechUtilities:
             # Custom speech parameters for robot
             self.customSpeech = audio_tools_msg()
             self.customSpeech.command = "enable"
-            #self.customSpeech.speech_parameters.pitch_shift=1 # Grueso (1) o Agudo (2)
-            #self.customSpeech.speech_parameters.double_voice_level= 0.0
-            #self.customSpeech.speech_parameters.double_voice_time_shift= 0.0
-            #self.customSpeech.speech_parameters.speed= 120.0 # Velocidad al hablar
             self.audioToolsService(self.customSpeech)
 
             # Enable mic
@@ -289,7 +285,7 @@ class SpeechUtilities:
             audio_tools_proxy(audioMessage)
             rospy.sleep(1)
         else:
-            self.sample_rate = 48000
+            self.sample_rate = 200000
         #Set led color to blue
         sl.setLedsColor(0,255,255)
         rospy.sleep(1)
@@ -544,13 +540,8 @@ class SpeechUtilities:
         audio_data = np.array(data.data, dtype=np.int16)
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
         audio_float32 = sl.int2float(audio_int16)
-        if self.device == "cpu":
-            self.sample_rate = 16000
-            num_samples = 512 if self.sample_rate == 16000 else 256
-            audio_rescaled = torch.from_numpy(audio_float32[:num_samples])
-        else:
-            audio_rescaled = torch.from_numpy(audio_float32)
-        new_confidence = vad_model(audio_rescaled, self.sample_rate).item()
+        audio_rescaled = torch.from_numpy(audio_float32[:512])
+        new_confidence = vad_model(audio_rescaled, 16000).item()
         if new_confidence>0.57:
             self.person_speaking = True
             self.last_speaking_instance = 0
