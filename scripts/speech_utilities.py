@@ -16,7 +16,7 @@ from openai import AzureOpenAI
 import torch
 torch.set_num_threads(1)
 
-repo_or_dir = 'snakers4/silero-vad'
+repo_or_dir = 'snakers4/silero-vad:v4.0'
 model_name = 'silero_vad'
 model_dir = torch.hub.get_dir()
 
@@ -540,8 +540,8 @@ class SpeechUtilities:
         audio_data = np.array(data.data, dtype=np.int16)
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
         audio_float32 = sl.int2float(audio_int16)
-        audio_rescaled = torch.from_numpy(audio_float32[:512])
-        new_confidence = vad_model(audio_rescaled, 16000).item()
+        audio_rescaled = torch.from_numpy(audio_float32)
+        new_confidence = vad_model(audio_rescaled, 48000).item()
         if new_confidence>0.57:
             self.person_speaking = True
             self.last_speaking_instance = 0
