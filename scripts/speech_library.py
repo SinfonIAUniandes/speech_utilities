@@ -122,42 +122,14 @@ def save_recording(buffer,file_name,sample_rate):
     print(consoleFormatter.format(f"Saving audio to: {file_name}", "WARNING"))
     # Check if data folder exists, if not, create it
     if not os.path.exists(PATH_DATA): 
-            os.makedirs(PATH_DATA) 
+        os.makedirs(PATH_DATA) 
     # Convert the audioBuffer into a array 
-    audio_buffer = np.array(buffer)
+    audio_buffer = np.array(buffer) 
     audio_buffer = audio_buffer.astype(float)
     audio_buffer = np.asarray(audio_buffer, dtype=np.int16)
     # Save the audio in the folder with a specific name
     path = PATH_DATA+"/"+file_name+".wav"
     sf.write(path,audio_buffer,sample_rate,closefd=True)
-
-def auto_cut_function(speech_utilities):
-    """
-    Input:
-    speech_utilities: speech_utilities object
-    ---
-    This function is used to automatically cut the audio when the person stops talking by changing the auto_finished variable to True
-    """
-    consoleFormatter=ConsoleFormatter.ConsoleFormatter()
-    if np.mean(np.abs(speech_utilities.audio_chunk)) > speech_utilities.silence_threshold and not speech_utilities.started_talking:
-        speech_utilities.times_above_threshold += 2
-    else:
-        if speech_utilities.times_above_threshold > 0:
-            speech_utilities.times_above_threshold -= 1
-    if speech_utilities.times_above_threshold > 8 and not speech_utilities.started_talking:
-        speech_utilities.started_talking = True
-        setLedsColor(0,255,255)
-        print(speech_utilities.started_talking)
-        print("times above threshold",speech_utilities.times_above_threshold)
-        print(consoleFormatter.format("Person started talking", "OKGREEN"))
-    if np.mean(np.abs(speech_utilities.audio_chunk)) < speech_utilities.silence_threshold and speech_utilities.started_talking:
-        speech_utilities.times_below_threshold += 1
-    else:
-        if speech_utilities.times_below_threshold > 0:
-            speech_utilities.times_below_threshold -= 2
-    if speech_utilities.times_below_threshold > 15 and not speech_utilities.auto_finished:
-        setLedsColor(255,255,255)
-        speech_utilities.auto_finished = True
         
 def gpt(client,messages,temperature):
     """

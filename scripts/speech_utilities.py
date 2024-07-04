@@ -27,10 +27,10 @@ except Exception as e:
     vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir, model=model_name, force_reload=True)
 
 # Speech_msgs
-from speech_msgs.srv import speech2text_srv, answer_srv, calibrate_srv, q_a_srv, talk_srv, hot_word_srv
+from speech_msgs.srv import speech2text_srv, answer_srv, q_a_srv, talk_srv, hot_word_srv
 
 # Robot_msgs
-from robot_toolkit_msgs.srv import audio_tools_srv, misc_tools_srv, set_speechrecognition_srv, set_words_threshold_srv, set_output_volume_srv, battery_service_srv
+from robot_toolkit_msgs.srv import audio_tools_srv, misc_tools_srv, set_speechrecognition_srv, set_words_threshold_srv, set_output_volume_srv
 from robot_toolkit_msgs.msg import audio_tools_msg, speech_msg, text_to_speech_status_msg, misc_tools_msg, text_to_speech_status_msg
 
 from std_srvs.srv import SetBool
@@ -56,13 +56,9 @@ class SpeechUtilities:
         self.PATH_DATA = self.PATH_SPEECH_UTILITIES+'/data'
 
         self.listening = False
-        self.audio_chunk =[]
-        self.audio_buffer = []
-        self.sample_rate = 200000
-        self.s2t =False
+        self.sample_rate = 16000
 
         # Autocut variables
-        self.auto_cut = False
         self.times_below_threshold = 0
         self.times_above_threshold =0
         self.auto_finished = False
@@ -138,7 +134,9 @@ class SpeechUtilities:
 
             # Custom speech parameters for robot
             self.customSpeech = audio_tools_msg()
-            self.customSpeech.command = "enable"
+            self.customSpeech.command = "custom"
+            self.customSpeech.frequency = 16000
+            self.customSpeech.channels = 3
             self.audioToolsService(self.customSpeech)
 
             # Enable mic
@@ -228,15 +226,13 @@ class SpeechUtilities:
             misc(miscMessage)
 
             rospy.wait_for_service('/robot_toolkit/audio_tools_srv')
-            audio = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
             # Send the command to the audio service
-            audioMessage = audio_tools_msg()
-            audioMessage.command = "disable" if enable else "enable"
-            audio(audioMessage)
-            audioMessage = audio_tools_msg()
-            audioMessage.command = command
-            rospy.sleep(1)
-            audio(audioMessage)
+            
+            self.customSpeech = audio_tools_msg()
+            self.customSpeech.command = "custom"
+            self.customSpeech.frequency = 16000
+            self.customSpeech.channels = 3
+            self.audioToolsService(self.customSpeech)
             return True
         
         except rospy.ServiceException as e:
@@ -274,18 +270,6 @@ class SpeechUtilities:
         self.speech_2_text_buffer = []
         #Set eyes to blue
         self.listening = True
-        self.s2t = True
-        if lang=="esp":
-            self.sample_rate = 16000
-            audio_tools_proxy = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
-            audioMessage = audio_tools_msg()
-            audioMessage.command = "custom"
-            audioMessage.frequency = 16000
-            audioMessage.channels = 3
-            audio_tools_proxy(audioMessage)
-            rospy.sleep(1)
-        else:
-            self.sample_rate = 200000
         #Set led color to blue
         sl.setLedsColor(0,255,255)
         rospy.sleep(1)
@@ -294,7 +278,6 @@ class SpeechUtilities:
             # Timeout if the person talking is not recognized or it takes too long
             max_timeout = 20
             t1 = time.time()
-            self.auto_cut = False
             while not self.person_speaking and time.time()-t1<5:
                 rospy.sleep(0.1)
             print(consoleFormatter.format("Person started talking", "OKGREEN"))
@@ -310,8 +293,6 @@ class SpeechUtilities:
             rospy.sleep(duration)
         #Set led color to white
         sl.setLedsColor(255,255,255)
-        self.s2t = False
-        self.auto_cut = False
         self.auto_finished = False
         self.started_talking = False
         self.set_volume(70)
@@ -319,13 +300,6 @@ class SpeechUtilities:
         sl.save_recording(self.speech_2_text_buffer,"speech2text",self.sample_rate)
         if lang=="esp":
             # Transcribe the audio
-            audioMessage = audio_tools_msg()
-            audioMessage.command = "disable"
-            audio_tools_proxy(audioMessage)
-            audioMessage = audio_tools_msg()
-            audioMessage.command = "enable"
-            rospy.sleep(1)
-            audio_tools_proxy(audioMessage)
             transcription = sl.transcribe_spanish(self.PATH_DATA+"/speech2text.wav", self.google_recognize)
         else:
             # Transcribe the audio
@@ -359,11 +333,15 @@ class SpeechUtilities:
             if hot_words == []:
                 print(consoleFormatter.format("Turning off the hot_word_srv", "FAIL"))
                 self.speech_recognition(False,False,False)
-            else:
-                print(consoleFormatter.format(f"Detecting words: {hot_words}, with threshold: {threshold}", "OKGREEN"))
-                self.speech_recognition(True,req.noise,req.eyes)
-                self.set_words(hot_words,threshold)
-                response = True
+            elif len(hot_words) > 0:
+                if hot_words[0] == "":
+                    print(consoleFormatter.format("Turning off the hot_word_srv", "FAIL"))
+                    self.speech_recognition(False,False,False)
+                else:
+                    print(consoleFormatter.format(f"Detecting words: {hot_words}, with threshold: {threshold}", "OKGREEN"))
+                    self.speech_recognition(True,req.noise,req.eyes)
+                    self.set_words(hot_words,threshold)
+                    response = True
         else:
             print(consoleFormatter.format("No Toolkit available", "FAIL"))
         return response
@@ -532,16 +510,12 @@ class SpeechUtilities:
         """
         # If the listening variable is set to True, the audio will be saved constantly in the audio buffer
         if self.listening:
-            self.audio_chunk = list(data.data)
-            self.audio_buffer.extend(data.data)
-            # When the speech2text is enabled, the variable self.speech_2_text_buffer will be filled with the audio data
-            if self.s2t:
-                self.speech_2_text_buffer.extend(data.data)
+            self.speech_2_text_buffer.extend(data.data)
         audio_data = np.array(data.data, dtype=np.int16)
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
         audio_float32 = sl.int2float(audio_int16)
         audio_rescaled = torch.from_numpy(audio_float32)
-        new_confidence = vad_model(audio_rescaled, 48000).item()
+        new_confidence = vad_model(audio_rescaled, 16000).item()
         if new_confidence>0.57:
             self.person_speaking = True
             self.last_speaking_instance = 0
