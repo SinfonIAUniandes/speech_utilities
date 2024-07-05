@@ -515,7 +515,7 @@ class SpeechUtilities:
         audio_int16 = np.frombuffer(audio_data.tobytes(), np.int16);
         audio_float32 = sl.int2float(audio_int16)
         audio_rescaled = torch.from_numpy(audio_float32)
-        new_confidence = vad_model(audio_rescaled, 16000).item()
+        new_confidence = vad_model(audio_rescaled, self.sample_rate).item()
         if new_confidence>0.57:
             self.person_speaking = True
             self.last_speaking_instance = 0
