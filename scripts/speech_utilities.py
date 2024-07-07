@@ -390,7 +390,7 @@ class SpeechUtilities:
                 rospy.sleep(0.05)
                 elapsed = float(time.perf_counter() * 1000)
                 if (float(elapsed-t1))/1000 >= timeout:
-                    break
+                    pass
             self.robot_speaking=False
         key = key.replace("\\rspd=100\\","")
         print(consoleFormatter.format(f"Pepper said: {key}","OKGREEN"))
@@ -417,24 +417,9 @@ class SpeechUtilities:
         while counter < 3:
             self.talk(question_value, "English", animated=False, wait=True)
             text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
-            if len(text)<2:
-                counter += 1
-                continue
-            if req.tag=="drink":
-                if ("so" in text):
-                    text = "soda"
-                elif ("cock" in text):
-                    text = "coke"
-                elif ("kofi" in text):
-                    text = "coffee"
-            if req.tag=="name":
-                if ("baby" in text):
-                    text = "david"
-                if ("job" in text or "done" in text):
-                    text = "john"
             print(f"Transcription: {text}")
-            counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
-            #counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
+            #counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
+            counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
         return answer
 

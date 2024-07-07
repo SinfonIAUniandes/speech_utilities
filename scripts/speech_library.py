@@ -236,50 +236,47 @@ def q_a_gpt(client, question, transcription, counter):
     prompt = """
         You are an assistant that processes transcribed audio responses. Your task is to interpret the context, correct any transcription errors, and provide the main corrected response concisely. If you cannot determine a logical response to the question from the given transcription, respond only with "Retry".
 
-        Here are some examples of how you should interpret the responses:
+        Here are some examples of how your output should be according to the question and transcription.
 
-        Example 1:
-        Question: "What is your favorite drink?"
-        Transcribed Response: "My favorite drink is so that"
-        Corrected Main Response: "Soda"
+        Examples:
+        
+        input: 
+            Question: "What is your favourite drink?"
+            Transcription: "My favorite drink is so that"
+        expected output: "Soda"
 
-        Example 2:
-        Question: "How old are you?"
-        Transcribed Response: "I am twenty one years old"
-        Corrected Main Response: "21"
+        input: 
+            Question: "How old are you?"
+            Transcription: "I am twenty one years old"
+        expected output: "21"
 
-        Example 3:
-        Question: "What is your name?"
-        Transcribed Response: "I call myself John"
-        Corrected Main Response: "John"
+        input: 
+            Question: "What is your name?"
+            Transcription: "I call myself John"
+        expected output: "John"
 
-        Example 4:
-        Question: "Where do you live?"
-        Transcribed Response: "I reside in New Yolk"
-        Corrected Main Response: "New York"
+        input: 
+            Question: "Where do you live?"
+            Transcription: "I reside in New Yolk"
+        expected output: "New York"
 
-        Example 5:
-        Question: "What is your favorite food?"
-        Transcribed Response: "My favorite food is pizzar"
-        Corrected Main Response: "Pizza"
+        input: 
+            Question: "What is your favourite drink?"
+            Transcription: "T"
+        expected output: "Tea"
 
-        Example 6:
-        Question: "What is your favorite movie?"
-        Transcribed Response: "My favorite movie is The Lord of the Reigns"
-        Corrected Main Response: "The Lord of the Rings"
+        input: 
+            Question: "What is your favorite movie?"
+            Transcription: "My favorite movie is The Lord of the Reigns"
+        expected output: "The Lord of the Rings"
 
-        Example 7:
-        Question: "What is your job?"
-        Transcribed Response: "I am a software developerr"
-        Corrected Main Response: "Software Developer"
         """
     
     interaction = f"""
-        Please follow this format to process the following question and transcribed response. If you cannot determine a logical response, respond only with "Retry":
-
         Question: "{question}"
-        Transcribed Response: "{transcription}"
-        Corrected Main Response:
+        Transcription: "{transcription}"
+        
+        output:
     """
 
     prediction = client.chat.completions.create(
@@ -311,7 +308,7 @@ def word_to_sec(text, wpm):
     Calculates the estimated time it would take to say a sentence at a given speed of words per minute (wpm) using experimental constants
     """
     c_1 = 37.6843059490085
-    c_3 = 0.5
+    c_3 = 0.7
     tokens = text.split()
     n_tokens = len(tokens)
     time = ((n_tokens/wpm)*c_1) + c_3
