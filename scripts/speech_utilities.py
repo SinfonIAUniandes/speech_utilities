@@ -410,16 +410,19 @@ class SpeechUtilities:
         df.set_index('tag', inplace=True)
         if req.tag in tags:
             question_value = df.at[req.tag, 'question']
+            counter = 0
+            while counter < 3:
+                self.talk(question_value, "English", animated=False, wait=True)
+                text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
+                print(f"Transcription: {text}")
+                counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
         else:
-            print(consoleFormatter.format(f"Invalid Tag", "FAIL"))
-            return "Invalid Tag"
-        counter = 0
-        while counter < 3:
-            self.talk(question_value, "English", animated=False, wait=True)
-            text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
-            print(f"Transcription: {text}")
-            #counter, answer = sl.q_a_processing(text, df, req.tag, counter) # ANTES
-            counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
+            counter = 0
+            while counter < 3:
+                self.talk(req.tag, "English", animated=False, wait=True)
+                text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
+                print(f"Transcription: {text}")
+                counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
         return answer
 

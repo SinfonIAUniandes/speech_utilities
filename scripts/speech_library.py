@@ -292,7 +292,7 @@ def q_a_gpt(client, question, transcription, counter):
         answer = ""
         counter += 1
     else:
-        answer = response
+        answer = response.replace("output","").replace("expected","").replace(":","")
         counter = 4
     return counter, answer
     
