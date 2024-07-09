@@ -421,8 +421,9 @@ class SpeechUtilities:
             while counter < 3:
                 self.talk(req.tag, "English", animated=False, wait=True)
                 text = self.speech2text(0,"").lower().replace(".","").replace("!","").replace("?","")
+                text = text.replace("cock","coke")
                 print(f"Transcription: {text}")
-                counter, answer = sl.q_a_gpt(self.clientGPT, question_value, text, counter) # Ahora se procesa con GPT-4o
+                counter, answer = sl.q_a_gpt(self.clientGPT, req.tag, text, counter) # Ahora se procesa con GPT-4o
         print(consoleFormatter.format(f"Local listened: {answer}", "OKGREEN"))
         return answer
 

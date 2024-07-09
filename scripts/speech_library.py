@@ -242,22 +242,47 @@ def q_a_gpt(client, question, transcription, counter):
         
         input: 
             Question: "What is your favourite drink?"
-            Transcription: "My favorite drink is so that"
+            Transcription: "my favorite drink is so that"
         expected output: "Soda"
+        
+        input: 
+            Question: "What is your favourite drink?"
+            Transcription: "so done"
+        expected output: "Soda"
+        
+        input: 
+            Question: "What is your favourite drink?"
+            Transcription: "master"
+        expected output: "Monster"
+        
+        input: 
+            Question: "What is your favourite drink?"
+            Transcription: "what the"
+        expected output: "Water"
 
         input: 
             Question: "How old are you?"
-            Transcription: "I am twenty one years old"
+            Transcription: "i am twenty one years old"
         expected output: "21"
 
         input: 
             Question: "What is your name?"
-            Transcription: "I call myself John"
+            Transcription: "alexa! you're gonna come here and please you're gonna come."
+        expected output: "Alexa"
+
+        input: 
+            Question: "What is your name?"
+            Transcription: "ap dul"
+        expected output: "Abdul"
+
+        input: 
+            Question: "What is your name?"
+            Transcription: "i call myself john"
         expected output: "John"
 
         input: 
             Question: "Where do you live?"
-            Transcription: "I reside in New Yolk"
+            Transcription: "i reside in new yolk"
         expected output: "New York"
 
         input: 
@@ -267,7 +292,7 @@ def q_a_gpt(client, question, transcription, counter):
 
         input: 
             Question: "What is your favorite movie?"
-            Transcription: "My favorite movie is The Lord of the Reigns"
+            Transcription: "my favorite movie is the lord of the reigns"
         expected output: "The Lord of the Rings"
 
         """
@@ -279,21 +304,25 @@ def q_a_gpt(client, question, transcription, counter):
         output:
     """
 
-    prediction = client.chat.completions.create(
-        model="GPT-4o", 
-        messages=[{"role":"system","content":prompt}, {"role":"user","content":interaction}], 
-        temperature=0.5, 
-        max_tokens=100
-    )
+    try:
+        prediction = client.chat.completions.create(
+            model="GPT-4o", 
+            messages=[{"role":"system","content":prompt}, {"role":"user","content":interaction}], 
+            temperature=0.5, 
+            max_tokens=100
+        )
 
-    response = prediction.choices[0].message.content
+        response = prediction.choices[0].message.content
 
-    if response == "Retry": 
+        if response == "Retry": 
+            answer = ""
+            counter += 1
+        else:
+            answer = response.replace("output","").replace("expected","").replace(":","")
+            counter = 4
+    except:
         answer = ""
         counter += 1
-    else:
-        answer = response.replace("output","").replace("expected","").replace(":","")
-        counter = 4
     return counter, answer
     
 def word_to_sec(text, wpm):
