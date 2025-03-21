@@ -56,7 +56,7 @@ class SpeechUtilities:
         # 0 Es que recien le acaban de hablar, el numero se refiere a hace cuantos buffers fue la ultima instancia de habla
         self.last_speaking_instance = 0
         
-        self.recorder = AudioToTextRecorder(use_microphone=False, spinner=False)
+        self.recorder = AudioToTextRecorder(use_microphone=False, spinner=False, language="en", model="base.en", silero_sensitivity=0.2, silero_deactivity_detection=True)
         self.process_text_thread = threading.Thread(target=self.recorder_to_text)
         self.process_text_thread.start()
         
@@ -110,12 +110,70 @@ class SpeechUtilities:
         print(consoleFormatter.format('waiting for speech2text service!', 'WARNING'))  
         self.speech2text_declaration= rospy.Service("speech_utilities/speech2text_srv", speech2text_srv, self.callback_speech2text)
         print(consoleFormatter.format('speech2text on!', 'OKGREEN'))
+        
+        print(consoleFormatter.format('waiting for talk service!', 'WARNING'))  
+        self.talk_declaration= rospy.Service("speech_utilities/talk_srv", talk_srv, self.callback_talk)
+        print(consoleFormatter.format('talk on!', 'OKGREEN'))
 
         # ================================== SUBSCRIBER TO MIC DECLARATION ==================================
 
         self.micSubscriber=rospy.Subscriber("/mic", AudioBuffer, self.audioCallbackSingleChannel)
+        
+        
+        self.speech_pub=rospy.Publisher('/speech', speech_msg, queue_size=10)
 
 ########################################  SPEECH SERVICES  ############################################
+        
+        
+        
+    # ================================== TALK ==================================
+    def callback_talk(self, req):
+        """
+        Input:
+        string key: Indicates the phrase that the robot must say
+        string language: Indicates the language which Pepper will speak [English, Spanish]
+        bool wait: Indicates if the robot should wait to shoot down the service
+        bool animated: Indicates if the robot should make gestures while talking
+        string talk_speed: Indicates the speech speed the robot will talk between 50-400 (default: 100)
+        ---
+        Callback for talk_speech_srv service: This service allows the robot to say the input of the service
+        """
+        print(consoleFormatter.format("Requested talk service!", "OKGREEN"))
+        if req.talk_speed == "":
+            req.talk_speed = 100
+        if self.ROS:
+            text = f"\\rspd={req.talk_speed}\\{req.key}"
+            self.talk(text,req.language,req.animated,wait=req.wait)
+        return f"Pepper said: {req.key}"
+    
+    def talk(self,key,language,animated,wait):
+        """
+        Input:
+        string key: Indicates the phrase that the robot must say
+        string language: Indicates the language which Pepper will speak [English, Spanish]
+        bool animated: Indicates if the robot should make gestures while talking
+        string talk_speed: Indicates the speech speed the robot will talk between 50-400 (default: 100)
+        ---
+        Internal function for speech services: This function allows the robot to say the input of the service. It halts execution.
+        """
+        t2s_msg = speech_msg()
+        t2s_msg.animated = animated
+        t2s_msg.language = language
+        t2s_msg.text = key
+        self.speech_pub.publish(t2s_msg)
+        print(consoleFormatter.format("Talking...","WARNING"))
+        if wait:
+            t1 = float(time.perf_counter() * 1000)
+            timeout = sl.word_to_sec(key, 100)
+            self.robot_speaking=True
+            while self.robot_speaking:
+                rospy.sleep(0.05)
+                elapsed = float(time.perf_counter() * 1000)
+                if (float(elapsed-t1))/1000 >= timeout:
+                    pass
+            self.robot_speaking=False
+        key = key.replace("\\rspd=100\\","")
+        print(consoleFormatter.format(f"Pepper said: {key}","OKGREEN"))
         
     # ================================== TURN MIC PEPPER ==================================
     def turn_mic_pepper(self, enable):
@@ -250,7 +308,7 @@ class SpeechUtilities:
             self.recorder.feed_audio(chunk=data.data)
 
     def process_text(self,text):
-        pyautogui.typewrite(text + " ")
+        print(text + " ")
     
     def recorder_to_text(self):
         while True:
