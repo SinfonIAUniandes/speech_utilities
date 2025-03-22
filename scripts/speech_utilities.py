@@ -13,6 +13,17 @@ import os
 import speech_library as sl
 import speech_recognition as sr
 from openai import AzureOpenAI
+# Speech_msgs
+from speech_msgs.srv import speech2text_srv, answer_srv, q_a_srv, talk_srv, hot_word_srv
+
+# Robot_msgs
+from robot_toolkit_msgs.srv import audio_tools_srv, misc_tools_srv, set_speechrecognition_srv, set_words_threshold_srv, set_output_volume_srv
+from robot_toolkit_msgs.msg import audio_tools_msg, speech_msg, text_to_speech_status_msg, misc_tools_msg, text_to_speech_status_msg
+
+from std_srvs.srv import SetBool
+
+# Naoqi_msgs
+from naoqi_bridge_msgs.msg import AudioBuffer
 import torch
 torch.set_num_threads(1)
 
@@ -26,17 +37,6 @@ except Exception as e:
     print(f"Modelo no encontrado localmente, descargando: {e}")
     vad_model, utils = torch.hub.load(repo_or_dir=repo_or_dir, model=model_name, force_reload=True)
 
-# Speech_msgs
-from speech_msgs.srv import speech2text_srv, answer_srv, q_a_srv, talk_srv, hot_word_srv
-
-# Robot_msgs
-from robot_toolkit_msgs.srv import audio_tools_srv, misc_tools_srv, set_speechrecognition_srv, set_words_threshold_srv, set_output_volume_srv
-from robot_toolkit_msgs.msg import audio_tools_msg, speech_msg, text_to_speech_status_msg, misc_tools_msg, text_to_speech_status_msg
-
-from std_srvs.srv import SetBool
-
-# Naoqi_msgs
-from naoqi_bridge_msgs.msg import AudioBuffer
 
 class SpeechUtilities:
 
@@ -65,25 +65,6 @@ class SpeechUtilities:
         self.speech_2_text_buffer = []
         self.started_talking = False
 
-        # Answer variables
-        self.info_herramientas = """
-        Your main programming language is Python, with some parts in C++. You operate thanks to ROS (Robot Operating System), which allows different computers to communicate and transfer real-time information about your surroundings, enabling you to act in the best possible way.
-
-        Your code is distributed across six main tools:
-
-        Toolkit: This tool develops the connection between you and ROS, providing all the necessary functions to the other tools in C++.
-
-        Speech: This tool uses artificial intelligence to process audio and natural language, allowing you to understand what people say and respond appropriately, using tools like Multimodal LLM's and speech to text models.
-
-        Interface: This tool handles your tablet and graphical interfaces using JavaScript and WebSockets for high-speed communication.
-
-        Perception: This tool utilizes your cameras for computer vision, helping you recognize your surroundings, using tools like torch, cuda and YOLO.
-
-        Navigation: This tool enables you to navigate intelligently and quickly in known and unknown environments, avoiding harm to yourself and others, for this you use the ROS Navigation Stack and your sensors: laser, sonar, gyroscope, accelerometer.
-
-        Manipulation: This tool controls your arms and body, allowing you to manipulate objects intelligently using your touch sensors."""
-        self.system_msg = f"You are a Pepper robot named Nova from the University of the Andes in Bogotá, Colombia, specially from the research group SinfonIA, you serve as a Social Robot and you are able to perform tasks such as guiding, answering questions, recognizing objects, people and faces, playing the guitar and dancing among others. You were built by SoftBank Robotics in France in 2014. You have been in the University since 2020 and you spend most of your time in Colivri laboratory.{self.info_herramientas} You are a girl.Answer all questions in the most accurate but nice way possible. Your response will be said by a robot, so please do not add any content that may be difficult to read, like code or math, just explain it. SinfonIA has an instagram account, it is @sinfonia_uniandes. There are 2 other robots in the Colivri laboratory who are your friends: Orion a male NAO Robot and Nova a female Pepper robot, all 3 of you are from Softbank Robotics"
-        self.conversation_gpt = [{"role":"system","content":self.system_msg}]
 
         # isTalking variable
         self.robot_speaking = False
@@ -113,18 +94,21 @@ class SpeechUtilities:
             # Initialice roscore
             subprocess.Popen('roscore')
             rospy.sleep(2)
-            rospy.init_node('SpeechUtilities', anonymous=True)
+            rospy.init_node('SpeechUtilities', anonymous=False)
+            
             # Initialice local audio publisher from PC mic
             self.audio_pub=rospy.Publisher('/mic', AudioBuffer, queue_size=10)
             local_audio = threading.Thread(target=self.publish_local_audio)
             local_audio.start()
             print(consoleFormatter.format("--Speech utilities Running in LOCALLY--", "OKGREEN"))
 
-        # ================================== IF PEPPER AVAILABLE ==================================
+        # ================================== IF ROBOT AVAILABLE ==================================
+
+
 
         if self.ROS:
             # Initialice speech node
-            rospy.init_node('SpeechUtilities', anonymous=True)
+            rospy.init_node('SpeechUtilities', anonymous=False)
             # Enable speech from toolkit
             rospy.wait_for_service('/robot_toolkit/audio_tools_srv')
             self.audioToolsService = rospy.ServiceProxy('/robot_toolkit/audio_tools_srv', audio_tools_srv)
@@ -140,10 +124,10 @@ class SpeechUtilities:
             self.audioToolsService(self.customSpeech)
 
             # Enable mic
-            self.turn_mic_pepper(True)
+            self.turn_mic_robot(True)
 
             # Publisher toolkit
-            print(consoleFormatter.format("--Speech utilities Running in PEPPER--", "OKGREEN"))  
+            print(consoleFormatter.format(f"--Speech utilities Running in ROBOT--", "OKGREEN"))  
 
             # Connect to the Toolit for Hot Word detection
             print(consoleFormatter.format("Waiting for pytoolkit/ALSpeechRecognition/set_speechrecognition_srv...", "WARNING"))
@@ -168,6 +152,18 @@ class SpeechUtilities:
             
             #Set led color to white
             sl.setLedsColor(255,255,255)
+            
+            
+        robot_name = rospy.get_param("/SpeechUtilities/robot_name", "nova")
+        print(consoleFormatter.format(f'ROBOT NAME IS {robot_name}', 'OKGREEN'))
+        # Answer variables
+        self.robot_name = robot_name.lower()
+        self.info_herramientas = ""
+        with open(self.PATH_DATA+"/tools_info.txt","r",encoding="utf-8") as file:
+            self.info_herramientas = file.read()
+        with open(self.PATH_DATA+f"/{self.robot_name}_info.txt","r",encoding="utf-8") as file:
+            self.system_msg = file.read().replace("{info_herramientas}",self.info_herramientas)
+        self.conversation_gpt = [{"role":"system","content":self.system_msg}]
             
             
         # ================================== SERVICES DECLARATION ==================================
@@ -204,8 +200,8 @@ class SpeechUtilities:
 
 ########################################  SPEECH SERVICES  ############################################
         
-    # ================================== TURN MIC PEPPER ==================================
-    def turn_mic_pepper(self, enable):
+    # ================================== TURN MIC ROBOT ==================================
+    def turn_mic_robot(self, enable):
         """
         Input:
         bool enable: if true, the microphone will be enabled. If false, the microphone will be disabled
@@ -351,7 +347,7 @@ class SpeechUtilities:
         """
         Input:
         string key: Indicates the phrase that the robot must say
-        string language: Indicates the language which Pepper will speak [English, Spanish]
+        string language: Indicates the language which robot will speak [English, Spanish]
         bool wait: Indicates if the robot should wait to shoot down the service
         bool animated: Indicates if the robot should make gestures while talking
         string talk_speed: Indicates the speech speed the robot will talk between 50-400 (default: 100)
@@ -364,13 +360,13 @@ class SpeechUtilities:
         if self.ROS:
             text = f"\\rspd={req.talk_speed}\\{req.key}"
             self.talk(text,req.language,req.animated,wait=req.wait)
-        return f"Pepper said: {req.key}"
+        return f"{self.robot_name.upper()} said: {req.key}"
     
     def talk(self,key,language,animated,wait):
         """
         Input:
         string key: Indicates the phrase that the robot must say
-        string language: Indicates the language which Pepper will speak [English, Spanish]
+        string language: Indicates the language which robot will speak [English, Spanish]
         bool animated: Indicates if the robot should make gestures while talking
         string talk_speed: Indicates the speech speed the robot will talk between 50-400 (default: 100)
         ---
@@ -393,7 +389,7 @@ class SpeechUtilities:
                     pass
             self.robot_speaking=False
         key = key.replace("\\rspd=100\\","")
-        print(consoleFormatter.format(f"Pepper said: {key}","OKGREEN"))
+        print(consoleFormatter.format(f"{self.robot_name.upper()} said: {key}","OKGREEN"))
         
     
     # ================================== Q_A ==================================
@@ -484,7 +480,7 @@ class SpeechUtilities:
         audio_msg.data = audio_data.flatten().tolist()
         self.audio_pub.publish(audio_msg)
 
-    # ================================== PEPPER AUDIO  ==================================
+    # ================================== ROBOT AUDIO  ==================================
     
     def check_rospy(self):
         while not rospy.is_shutdown():
@@ -512,7 +508,7 @@ class SpeechUtilities:
             self.person_speaking = False
             self.last_speaking_instance += 1
 
-    # ================================== PEPPER ISTALKING ==================================
+    # ================================== ROBOT ISTALKING ==================================
     def callback_check_speaking(self,data):
         """
         Callback function for the /pytoolkit/ALTextToSpeech/status topic
@@ -528,9 +524,10 @@ if __name__ == '__main__':
     consoleFormatter=ConsoleFormatter.ConsoleFormatter()
     print(consoleFormatter.format(" --- trying to initialize speech utilities node ---","OKGREEN"))
     speechUtilities = SpeechUtilities()
+    
     try:
         if speechUtilities.ROS:
-            print(consoleFormatter.format(" --- PEPPER speech utilities node successfully initialized ---","OKGREEN"))
+            print(consoleFormatter.format(f" --- ROBOT speech utilities node successfully initialized ---","OKGREEN"))
         else:
             print(consoleFormatter.format(" --- LOCAL speech utilities node successfully initialized ---","OKGREEN"))
         rospy.spin()
