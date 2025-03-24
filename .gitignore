@@ -1,4 +1,8 @@
 data
 scripts/__pycache__/*.pyc
 !/data/data.csv
+!/data/tools_info.txt
+!/data/orion_info.txt
+!/data/opera_info.txt
+!/data/nova_info.txt
 .vscode
