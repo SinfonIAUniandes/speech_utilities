@@ -1,4 +1,4 @@
 tag,question,category,posible,no_wanted
-name,what is your name?,"PRP,NNP","angel,axel,adel,charlie,john,jules,morgan,paris,robin,simone,jane",nothing
+name,what is your name?,"PRP,NNP","axel,charlie,john,jules,morgan,paris,robin,simone,jane,david,alexa,lucas,jesus,mary,james,alex,mike,tomas,thomas",nothing
 age,how old are you?,CD,nothing,nothing
-drink,what is your favorite drink?,"NN,NNS,PRP","soda,Coke,Beer",drink
+drink,what is your favorite drink?,"NN,NNS,PRP","soda,coke,beer,milk,coffee,juice,whiskey,tea,pepsi,wine,rum,water,matcha,chocolate,cocoa,redbull,monster,milkshake,smoothie",drink
