@@ -10,6 +10,7 @@ import speech_library as sl
 from RealtimeSTT import AudioToTextRecorder
 import pyautogui
 import struct
+from openai import AzureOpenAI
 
 # Speech_msgs
 from speech_msgs.srv import speech2text_srv, answer_srv, q_a_srv, talk_srv, hot_word_srv
@@ -51,17 +52,30 @@ class SpeechUtilities:
         self.speech_2_text_buffer = []
         self.started_talking = False
 
+
+        # isTalking variable
+        self.robot_speaking = False
+
+
         #Google
         self.person_speaking = False
         # 0 Es que recien le acaban de hablar, el numero se refiere a hace cuantos buffers fue la ultima instancia de habla
         self.last_speaking_instance = 0
         
-        self.recorder = AudioToTextRecorder(use_microphone=False, spinner=False, language="en", model="base.en", silero_sensitivity=0.2, silero_deactivity_detection=True)
+        self.recorder = AudioToTextRecorder(use_microphone=False, spinner=False, language="es", model="base", silero_sensitivity=0.25, silero_deactivity_detection=True)
         self.process_text_thread = threading.Thread(target=self.recorder_to_text)
         self.process_text_thread.start()
         
         self.rospy_check = threading.Thread(target=self.check_rospy)
         self.rospy_check.start()
+
+        
+        # OpenAI GPT Model
+        self.clientGPT = AzureOpenAI(
+            azure_endpoint= "https://sinfonia.openai.azure.com/",
+            api_key= os.getenv("GPT_API"),
+            api_version="2024-02-01",
+        )
 
         # ================================== IF PEPPER AVAILABLE ==================================
 
@@ -100,9 +114,23 @@ class SpeechUtilities:
             print(consoleFormatter.format("Waiting for pytoolkit/ALAutonomousBlinking/toggle_blinking_srv...", "WARNING"))
             rospy.wait_for_service("/pytoolkit/ALAutonomousBlinking/toggle_blinking_srv")
             self.toggle_blinking = rospy.ServiceProxy("/pytoolkit/ALAutonomousBlinking/toggle_blinking_srv", SetBool)
+
+            # Subscriber Service Speech Recognition
+            print(consoleFormatter.format('Waiting for /pytoolkit/ALTextToSpeech/status...', 'WARNING'))
+            self.talkinSubscriber = rospy.Subscriber('/pytoolkit/ALTextToSpeech/status', text_to_speech_status_msg, self.callback_check_speaking)
             
             #Set led color to white
             sl.setLedsColor(255,255,255)
+        robot_name = "nova"
+        print(consoleFormatter.format(f'ROBOT NAME IS {robot_name}', 'OKGREEN'))
+        # Answer variables
+        self.robot_name = robot_name.lower()
+        self.info_herramientas = ""
+        with open(self.PATH_DATA+"/tools_info.txt","r",encoding="utf-8") as file:
+            self.info_herramientas = file.read()
+        with open(self.PATH_DATA+f"/{self.robot_name}_info.txt","r",encoding="utf-8") as file:
+            self.system_msg = file.read().replace("{info_herramientas}",self.info_herramientas)
+        self.conversation_gpt = [{"role":"system","content":self.system_msg}]
             
             
         # ================================== SERVICES DECLARATION ==================================
@@ -309,10 +337,27 @@ class SpeechUtilities:
 
     def process_text(self,text):
         print(text + " ")
+        request = f"""La persona dijo: {text}. Si hay palabras en otro idioma en tu respuesta escribelas como se pronunicarian en español porque en este momento solo puedes hablar español y ningun otro idioma, por ejemplo si en tu respuesta esta Python, responde Paiton. No añadas contenido complejo a tu respuesta como codigo, solo explica lo que sea necesario. Manten tus respuestas cortas"""
+        self.conversation_gpt.append({"role":"user","content":request})
+        response = sl.gpt(self.clientGPT, self.conversation_gpt,0)["content"]
+        self.listening = False
+        self.talk(key=response,language="Spanish",animated=False,wait=True)
+        self.listening = True
     
     def recorder_to_text(self):
         while True:
             self.recorder.text(self.process_text)
+
+    # ================================== ROBOT ISTALKING ==================================
+    def callback_check_speaking(self,data):
+        """
+        Callback function for the /pytoolkit/ALTextToSpeech/status topic
+        data.data (str): string saying if the robot is speaking
+        """
+        if data.status == "done":
+            self.robot_speaking = False
+        else:
+            self.robot_speaking = True
 
 # ================================== MAIN ==================================
 
